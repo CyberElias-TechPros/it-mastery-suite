@@ -1,0 +1,213 @@
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Ticket, Clock, CheckCircle2, AlertTriangle, TrendingUp } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/contexts/AuthContext";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+
+export default function Dashboard() {
+  const { profile } = useAuth();
+
+  const { data: stats, isLoading } = useQuery({
+    queryKey: ["dashboard-stats"],
+    queryFn: async () => {
+      const { data: tickets } = await supabase.from("tickets").select("*");
+      
+      return {
+        totalTickets: tickets?.length || 0,
+        openTickets: tickets?.filter((t) => t.status === "open").length || 0,
+        inProgress: tickets?.filter((t) => t.status === "in_progress").length || 0,
+        resolved: tickets?.filter((t) => t.status === "resolved" || t.status === "closed").length || 0,
+        highPriority: tickets?.filter((t) => t.priority === "high" || t.priority === "critical").length || 0,
+      };
+    },
+  });
+
+  const { data: recentTickets } = useQuery({
+    queryKey: ["recent-tickets"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("tickets")
+        .select(`
+          *,
+          created_by_profile:profiles!tickets_created_by_fkey(full_name),
+          assigned_to_profile:profiles!tickets_assigned_to_fkey(full_name)
+        `)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      return data || [];
+    },
+  });
+
+  const statCards = [
+    {
+      title: "Open Tickets",
+      value: stats?.openTickets || 0,
+      icon: Ticket,
+      color: "text-blue-600",
+      bgColor: "bg-blue-50 dark:bg-blue-950",
+    },
+    {
+      title: "In Progress",
+      value: stats?.inProgress || 0,
+      icon: Clock,
+      color: "text-warning",
+      bgColor: "bg-warning/10",
+    },
+    {
+      title: "Resolved",
+      value: stats?.resolved || 0,
+      icon: CheckCircle2,
+      color: "text-success",
+      bgColor: "bg-success/10",
+    },
+    {
+      title: "High Priority",
+      value: stats?.highPriority || 0,
+      icon: AlertTriangle,
+      color: "text-destructive",
+      bgColor: "bg-destructive/10",
+    },
+  ];
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case "critical":
+        return "destructive";
+      case "high":
+        return "destructive";
+      case "medium":
+        return "warning";
+      default:
+        return "secondary";
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "open":
+        return "bg-blue-500";
+      case "in_progress":
+        return "bg-warning";
+      case "resolved":
+        return "bg-success";
+      case "closed":
+        return "bg-muted";
+      default:
+        return "bg-secondary";
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i} className="animate-pulse">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <div className="h-4 w-24 rounded bg-muted" />
+                <div className="h-10 w-10 rounded bg-muted" />
+              </CardHeader>
+              <CardContent>
+                <div className="h-8 w-16 rounded bg-muted" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground">
+            Welcome back, {profile?.full_name || "User"}!
+          </p>
+        </div>
+        <Link to="/tickets/new">
+          <Button>
+            <Ticket className="mr-2 h-4 w-4" />
+            New Ticket
+          </Button>
+        </Link>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {statCards.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <Card key={stat.title}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{stat.title}</CardTitle>
+                <div className={`rounded-lg p-2 ${stat.bgColor}`}>
+                  <Icon className={`h-4 w-4 ${stat.color}`} />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stat.value}</div>
+                <p className="text-xs text-muted-foreground">
+                  {stat.value === 1 ? "ticket" : "tickets"}
+                </p>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Recent Tickets</CardTitle>
+            <Link to="/tickets">
+              <Button variant="ghost" size="sm">
+                View All
+                <TrendingUp className="ml-2 h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!recentTickets || recentTickets.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground">
+              No tickets yet. Create your first ticket to get started!
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {recentTickets.map((ticket: any) => (
+                <Link key={ticket.id} to={`/tickets/${ticket.id}`}>
+                  <div className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50">
+                    <div className="flex items-center gap-4">
+                      <div className={`h-2 w-2 rounded-full ${getStatusColor(ticket.status)}`} />
+                      <div>
+                        <p className="font-medium">{ticket.title}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {ticket.ticket_number} • Created by {ticket.created_by_profile?.full_name}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={getPriorityColor(ticket.priority) as any}>
+                        {ticket.priority}
+                      </Badge>
+                      <Badge variant="outline" className="capitalize">
+                        {ticket.status.replace("_", " ")}
+                      </Badge>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
