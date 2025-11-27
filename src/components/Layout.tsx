@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Ticket, LayoutDashboard, Users, LogOut, Menu } from "lucide-react";
+import { Ticket, LayoutDashboard, Users, LogOut, Menu, User, Package, Fuel, Calendar, Building, FileText, BookOpen, DollarSign, BarChart3, Activity, Zap, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -18,6 +18,19 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Tickets", href: "/tickets", icon: Ticket },
+  { name: "Assets", href: "/assets", icon: Package },
+  { name: "Diesel", href: "/diesel", icon: Fuel },
+  { name: "Calendar", href: "/calendar", icon: Calendar },
+  { name: "Vendors", href: "/vendors", icon: Building },
+  { name: "Purchase Orders", href: "/purchase-orders", icon: FileText },
+  { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
+  { name: "Expenses", href: "/expenses", icon: DollarSign },
+  { name: "Reports", href: "/reports", icon: BarChart3 },
+  { name: "Notifications", href: "/notifications", icon: Bell },
+  { name: "Automation", href: "/automation", icon: Zap, adminOnly: true },
+  { name: "System Health", href: "/system-health", icon: Activity, adminOnly: true },
+  { name: "Branches", href: "/branches", icon: Building, adminOnly: true },
+  { name: "Budgets", href: "/budgets", icon: DollarSign, adminOnly: true },
   { name: "Users", href: "/users", icon: Users, adminOnly: true },
 ];
 
@@ -130,6 +143,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   <p className="text-xs font-medium text-primary capitalize">{profile?.role}</p>
                 </div>
               </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link to="/profile">
+                  <User className="mr-2 h-4 w-4" />
+                  <span>Profile</span>
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleSignOut}>
                 <LogOut className="mr-2 h-4 w-4" />

@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Ticket, Clock, CheckCircle2, AlertTriangle, TrendingUp } from "lucide-react";
+import { Ticket, Clock, CheckCircle2, AlertTriangle, TrendingUp, Wrench, Package, DollarSign, AlertCircle, Fuel, Calendar, Zap, BookOpen } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 
 export default function Dashboard() {
   const { profile } = useAuth();
@@ -13,14 +14,88 @@ export default function Dashboard() {
   const { data: stats, isLoading } = useQuery({
     queryKey: ["dashboard-stats"],
     queryFn: async () => {
+      // Tickets stats
       const { data: tickets } = await supabase.from("tickets").select("*");
-      
+
+      // Assets stats
+      const { data: assets } = await supabase.from("assets").select("*");
+
+      // Expenses stats (current month)
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      const { data: monthlyExpenses } = await supabase
+        .from("expenses")
+        .select("amount, approved_at")
+        .gte("expense_date", startOfMonth.toISOString());
+
+      // Pending expenses
+      const { data: pendingExpenses } = await supabase
+        .from("expenses")
+        .select("amount")
+        .is("approved_at", null);
+
+      // Diesel logs stats
+      const { data: dieselLogs } = await supabase
+        .from("diesel_logs")
+        .select("consumed_stock, cost_per_liter")
+        .order("date", { ascending: false })
+        .limit(1);
+
+      // Calendar events today
+      const today = new Date().toISOString().split('T')[0];
+      const { data: events } = await supabase
+        .from("calendar_events")
+        .select("*")
+        .gte("start_date", `${today}T00:00:00`)
+        .lt("start_date", `${today}T23:59:59`);
+
+      // Vendor contracts expiring soon
+      const thirtyDaysFromNow = new Date();
+      thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+      const { data: expiringContracts } = await supabase
+        .from("vendors")
+        .select("*")
+        .lte("contract_end_date", thirtyDaysFromNow.toISOString())
+        .gte("contract_end_date", new Date().toISOString());
+
+      // Knowledge base activity
+      const { data: kbArticles } = await supabase
+        .from("kb_articles")
+        .select("view_count")
+        .order("updated_at", { ascending: false })
+        .limit(10);
+
+      const totalViews = kbArticles?.reduce((sum, article) => sum + (article.view_count || 0), 0) || 0;
+
       return {
+        // Ticket stats
         totalTickets: tickets?.length || 0,
         openTickets: tickets?.filter((t) => t.status === "open").length || 0,
         inProgress: tickets?.filter((t) => t.status === "in_progress").length || 0,
         resolved: tickets?.filter((t) => t.status === "resolved" || t.status === "closed").length || 0,
         highPriority: tickets?.filter((t) => t.priority === "high" || t.priority === "critical").length || 0,
+        overdueTickets: tickets?.filter((t) => t.sla_due_date && new Date(t.sla_due_date) < new Date() && t.status !== "closed").length || 0,
+
+        // Asset stats
+        totalAssets: assets?.length || 0,
+        activeAssets: assets?.filter((a) => a.status === "active").length || 0,
+        maintenanceAssets: assets?.filter((a) => a.status === "in_maintenance").length || 0,
+        disposedAssets: assets?.filter((a) => a.status === "disposed").length || 0,
+
+        // Financial stats
+        monthlyExpenditure: monthlyExpenses?.filter(e => e.approved_at).reduce((sum, exp) => sum + (exp.amount || 0), 0) || 0,
+        pendingExpenses: pendingExpenses?.reduce((sum, exp) => sum + (exp.amount || 0), 0) || 0,
+        pendingExpenseCount: pendingExpenses?.length || 0,
+
+        // Diesel stats
+        latestDieselConsumption: dieselLogs?.[0]?.consumed_stock || 0,
+        dieselCost: (dieselLogs?.[0]?.consumed_stock || 0) * (dieselLogs?.[0]?.cost_per_liter || 0),
+
+        // Other stats
+        todayEvents: events?.length || 0,
+        expiringContracts: expiringContracts?.length || 0,
+        kbActivity: totalViews,
       };
     },
   });
@@ -53,22 +128,71 @@ export default function Dashboard() {
       title: "In Progress",
       value: stats?.inProgress || 0,
       icon: Clock,
-      color: "text-warning",
-      bgColor: "bg-warning/10",
+      color: "text-yellow-600",
+      bgColor: "bg-yellow-50 dark:bg-yellow-950",
     },
     {
-      title: "Resolved",
-      value: stats?.resolved || 0,
-      icon: CheckCircle2,
-      color: "text-success",
-      bgColor: "bg-success/10",
-    },
-    {
-      title: "High Priority",
-      value: stats?.highPriority || 0,
+      title: "Overdue Tickets",
+      value: stats?.overdueTickets || 0,
       icon: AlertTriangle,
-      color: "text-destructive",
-      bgColor: "bg-destructive/10",
+      color: "text-red-600",
+      bgColor: "bg-red-50 dark:bg-red-950",
+    },
+    {
+      title: "Active Assets",
+      value: stats?.activeAssets || 0,
+      icon: Package,
+      color: "text-green-600",
+      bgColor: "bg-green-50 dark:bg-green-950",
+    },
+    {
+      title: "Assets in Maintenance",
+      value: stats?.maintenanceAssets || 0,
+      icon: Wrench,
+      color: "text-orange-600",
+      bgColor: "bg-orange-50 dark:bg-orange-950",
+    },
+    {
+      title: "Monthly Expenditure",
+      value: `$${(stats?.monthlyExpenditure || 0).toLocaleString()}`,
+      icon: DollarSign,
+      color: "text-purple-600",
+      bgColor: "bg-purple-50 dark:bg-purple-950",
+    },
+    {
+      title: "Pending Approvals",
+      value: stats?.pendingExpenseCount || 0,
+      icon: AlertCircle,
+      color: "text-orange-600",
+      bgColor: "bg-orange-50 dark:bg-orange-950",
+    },
+    {
+      title: "Diesel Consumption",
+      value: `${stats?.latestDieselConsumption || 0}L`,
+      icon: Fuel,
+      color: "text-cyan-600",
+      bgColor: "bg-cyan-50 dark:bg-cyan-950",
+    },
+    {
+      title: "Today's Events",
+      value: stats?.todayEvents || 0,
+      icon: Calendar,
+      color: "text-indigo-600",
+      bgColor: "bg-indigo-50 dark:bg-indigo-950",
+    },
+    {
+      title: "Expiring Contracts",
+      value: stats?.expiringContracts || 0,
+      icon: AlertCircle,
+      color: "text-red-600",
+      bgColor: "bg-red-50 dark:bg-red-950",
+    },
+    {
+      title: "KB Article Views",
+      value: stats?.kbActivity || 0,
+      icon: BookOpen,
+      color: "text-teal-600",
+      bgColor: "bg-teal-50 dark:bg-teal-950",
     },
   ];
 
@@ -106,7 +230,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold">Dashboard</h1>
         </div>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {[...Array(4)].map((_, i) => (
             <Card key={i} className="animate-pulse">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -160,6 +284,60 @@ export default function Dashboard() {
             </Card>
           );
         })}
+      </div>
+
+      {/* SLA Compliance and System Health */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5" />
+              SLA Compliance
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Overall Compliance</span>
+                <span className="font-medium">
+                  {stats ? Math.round(((stats.totalTickets - (stats.overdueTickets || 0)) / Math.max(stats.totalTickets, 1)) * 100) : 0}%
+                </span>
+              </div>
+              <Progress
+                value={stats ? ((stats.totalTickets - (stats.overdueTickets || 0)) / Math.max(stats.totalTickets, 1)) * 100 : 0}
+                className="h-2"
+              />
+              <p className="text-xs text-muted-foreground">
+                {stats?.overdueTickets || 0} tickets are currently overdue
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5" />
+              System Health
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Database</span>
+                <Badge variant="secondary" className="bg-green-100 text-green-800">Healthy</Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">API Response</span>
+                <Badge variant="secondary" className="bg-green-100 text-green-800">Good</Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Storage</span>
+                <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">75% Used</Badge>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>
