@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Ticket, Clock, CheckCircle2, AlertTriangle, TrendingUp, Wrench, Package, DollarSign, AlertCircle, Fuel, Calendar, Zap, BookOpen } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -14,105 +14,84 @@ export default function Dashboard() {
   const { data: stats, isLoading } = useQuery({
     queryKey: ["dashboard-stats"],
     queryFn: async () => {
-      // Tickets stats
-      const { data: tickets } = await supabase.from("tickets").select("*");
+      try {
+        // Get all stats from different endpoints
+        const [ticketStats, assetStats, expenseStats, dieselLogs, events, vendors, kbArticles] = await Promise.all([
+          apiClient.getTicketStats(),
+          apiClient.getAssetStats(),
+          apiClient.getExpenseStats(),
+          apiClient.getDieselLogs(),
+          apiClient.getCalendarEvents({
+            start: new Date().toISOString().split('T')[0] + 'T00:00:00',
+            end: new Date().toISOString().split('T')[0] + 'T23:59:59'
+          }),
+          apiClient.getVendors(),
+          apiClient.getKBArticles({ limit: 10 })
+        ]);
 
-      // Assets stats
-      const { data: assets } = await supabase.from("assets").select("*");
+        // Calculate additional stats
+        const latestDiesel = dieselLogs.logs?.[0] || {};
+        const expiringContracts = vendors.vendors?.filter(v =>
+          v.contract_end_date &&
+          new Date(v.contract_end_date) > new Date() &&
+          new Date(v.contract_end_date) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        ).length || 0;
 
-      // Expenses stats (current month)
-      const startOfMonth = new Date();
-      startOfMonth.setDate(1);
-      startOfMonth.setHours(0, 0, 0, 0);
-      const { data: monthlyExpenses } = await supabase
-        .from("expenses")
-        .select("amount, approved_at")
-        .gte("expense_date", startOfMonth.toISOString());
+        const totalKBViews = kbArticles.articles?.reduce((sum, article) => sum + (article.view_count || 0), 0) || 0;
 
-      // Pending expenses
-      const { data: pendingExpenses } = await supabase
-        .from("expenses")
-        .select("amount")
-        .is("approved_at", null);
+        return {
+          // Ticket stats
+          totalTickets: ticketStats.stats.total_tickets || 0,
+          openTickets: ticketStats.stats.open_tickets || 0,
+          inProgress: ticketStats.stats.in_progress || 0,
+          resolved: ticketStats.stats.resolved || 0,
+          highPriority: ticketStats.stats.high_priority || 0,
+          overdueTickets: ticketStats.stats.overdue || 0,
 
-      // Diesel logs stats
-      const { data: dieselLogs } = await supabase
-        .from("diesel_logs")
-        .select("consumed_stock, cost_per_liter")
-        .order("date", { ascending: false })
-        .limit(1);
+          // Asset stats
+          totalAssets: assetStats.stats.total_assets || 0,
+          activeAssets: assetStats.stats.active_assets || 0,
+          maintenanceAssets: assetStats.stats.maintenance_assets || 0,
+          disposedAssets: assetStats.stats.disposed_assets || 0,
 
-      // Calendar events today
-      const today = new Date().toISOString().split('T')[0];
-      const { data: events } = await supabase
-        .from("calendar_events")
-        .select("*")
-        .gte("start_date", `${today}T00:00:00`)
-        .lt("start_date", `${today}T23:59:59`);
+          // Financial stats
+          monthlyExpenditure: expenseStats.stats.total_amount || 0,
+          pendingExpenses: expenseStats.stats.total_amount || 0,
+          pendingExpenseCount: expenseStats.stats.pending_approval || 0,
 
-      // Vendor contracts expiring soon
-      const thirtyDaysFromNow = new Date();
-      thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-      const { data: expiringContracts } = await supabase
-        .from("vendors")
-        .select("*")
-        .lte("contract_end_date", thirtyDaysFromNow.toISOString())
-        .gte("contract_end_date", new Date().toISOString());
+          // Diesel stats
+          latestDieselConsumption: latestDiesel.consumed_stock || 0,
+          dieselCost: (latestDiesel.consumed_stock || 0) * (latestDiesel.cost_per_liter || 0),
 
-      // Knowledge base activity
-      const { data: kbArticles } = await supabase
-        .from("kb_articles")
-        .select("view_count")
-        .order("updated_at", { ascending: false })
-        .limit(10);
-
-      const totalViews = kbArticles?.reduce((sum, article) => sum + (article.view_count || 0), 0) || 0;
-
-      return {
-        // Ticket stats
-        totalTickets: tickets?.length || 0,
-        openTickets: tickets?.filter((t) => t.status === "open").length || 0,
-        inProgress: tickets?.filter((t) => t.status === "in_progress").length || 0,
-        resolved: tickets?.filter((t) => t.status === "resolved" || t.status === "closed").length || 0,
-        highPriority: tickets?.filter((t) => t.priority === "high" || t.priority === "critical").length || 0,
-        overdueTickets: tickets?.filter((t) => t.sla_due_date && new Date(t.sla_due_date) < new Date() && t.status !== "closed").length || 0,
-
-        // Asset stats
-        totalAssets: assets?.length || 0,
-        activeAssets: assets?.filter((a) => a.status === "active").length || 0,
-        maintenanceAssets: assets?.filter((a) => a.status === "in_maintenance").length || 0,
-        disposedAssets: assets?.filter((a) => a.status === "disposed").length || 0,
-
-        // Financial stats
-        monthlyExpenditure: monthlyExpenses?.filter(e => e.approved_at).reduce((sum, exp) => sum + (exp.amount || 0), 0) || 0,
-        pendingExpenses: pendingExpenses?.reduce((sum, exp) => sum + (exp.amount || 0), 0) || 0,
-        pendingExpenseCount: pendingExpenses?.length || 0,
-
-        // Diesel stats
-        latestDieselConsumption: dieselLogs?.[0]?.consumed_stock || 0,
-        dieselCost: (dieselLogs?.[0]?.consumed_stock || 0) * (dieselLogs?.[0]?.cost_per_liter || 0),
-
-        // Other stats
-        todayEvents: events?.length || 0,
-        expiringContracts: expiringContracts?.length || 0,
-        kbActivity: totalViews,
-      };
+          // Other stats
+          todayEvents: events.events?.length || 0,
+          expiringContracts,
+          kbActivity: totalKBViews,
+        };
+      } catch (error) {
+        console.error('Dashboard stats error:', error);
+        // Return default values on error
+        return {
+          totalTickets: 0, openTickets: 0, inProgress: 0, resolved: 0, highPriority: 0, overdueTickets: 0,
+          totalAssets: 0, activeAssets: 0, maintenanceAssets: 0, disposedAssets: 0,
+          monthlyExpenditure: 0, pendingExpenses: 0, pendingExpenseCount: 0,
+          latestDieselConsumption: 0, dieselCost: 0,
+          todayEvents: 0, expiringContracts: 0, kbActivity: 0,
+        };
+      }
     },
   });
 
   const { data: recentTickets } = useQuery({
     queryKey: ["recent-tickets"],
     queryFn: async () => {
-      const { data } = await supabase
-        .from("tickets")
-        .select(`
-          *,
-          created_by_profile:profiles!tickets_created_by_fkey(full_name),
-          assigned_to_profile:profiles!tickets_assigned_to_fkey(full_name)
-        `)
-        .order("created_at", { ascending: false })
-        .limit(5);
-      return data || [];
+      try {
+        const response = await apiClient.getTickets({ limit: 5, page: 1 });
+        return response.tickets || [];
+      } catch (error) {
+        console.error('Recent tickets error:', error);
+        return [];
+      }
     },
   });
 
