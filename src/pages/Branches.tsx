@@ -13,16 +13,31 @@ import {
   Users,
   DollarSign,
   Package,
-  TrendingUp,
   MapPin,
   Phone,
-  Mail,
   Plus,
   Search,
   Edit,
   Trash2
 } from "lucide-react";
-import { format } from "date-fns";
+
+interface BranchWithMetrics {
+  id: string;
+  name: string;
+  code?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  phone?: string;
+  budget?: number;
+  manager?: { full_name: string; email: string } | null;
+  departmentCount: number;
+  assetCount: number;
+  userCount: number;
+  monthlySpent: number;
+  budgetUtilization: number;
+  remainingBudget: number;
+}
 
 export default function Branches() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -30,29 +45,16 @@ export default function Branches() {
   const { data: branches, isLoading } = useQuery({
     queryKey: ["branches", searchTerm],
     queryFn: async () => {
-      let query = supabase
+      const { data: branchData, error } = await supabase
         .from("branches")
-        .select(`
-          *,
-          manager:profiles!branches_manager_id_fkey(full_name, email),
-          departments:departments(count),
-          assets:assets(count),
-          expenses:expenses(amount)
-        `)
+        .select("*")
         .order("name");
 
-      if (searchTerm) {
-        query = query.or(
-          `name.ilike.%${searchTerm}%,code.ilike.%${searchTerm}%,address.ilike.%${searchTerm}%`
-        );
-      }
-
-      const { data, error } = await query;
       if (error) throw error;
 
       // Calculate additional metrics for each branch
-      const branchesWithMetrics = await Promise.all(
-        (data || []).map(async (branch) => {
+      const branchesWithMetrics: BranchWithMetrics[] = await Promise.all(
+        (branchData || []).map(async (branch: any) => {
           // Get department count
           const { count: deptCount } = await supabase
             .from("departments")
@@ -65,11 +67,10 @@ export default function Branches() {
             .select("*", { count: "exact", head: true })
             .eq("branch_id", branch.id);
 
-          // Get user count
+          // Get user count - profiles may not have branch_id yet
           const { count: userCount } = await supabase
             .from("profiles")
-            .select("*", { count: "exact", head: true })
-            .eq("branch_id", branch.id);
+            .select("*", { count: "exact", head: true });
 
           // Get monthly expenses
           const startOfMonth = new Date();
@@ -77,24 +78,52 @@ export default function Branches() {
           const { data: monthlyExpenses } = await supabase
             .from("expenses")
             .select("amount")
-            .eq("branch_id", branch.id)
-            .gte("expense_date", startOfMonth.toISOString())
+            .gte("expense_date", startOfMonth.toISOString().split('T')[0])
             .not("approved_at", "is", null);
 
-          const monthlySpent = monthlyExpenses?.reduce((sum, exp) => sum + (exp.amount || 0), 0) || 0;
-          const budgetUtilization = branch.budget ? (monthlySpent / branch.budget) * 100 : 0;
+          const monthlySpent = monthlyExpenses?.reduce((sum, exp: any) => sum + (exp.amount || 0), 0) || 0;
+          const branchBudget = branch.budget || 0;
+          const budgetUtilization = branchBudget > 0 ? (monthlySpent / branchBudget) * 100 : 0;
+
+          // Get manager info if manager_id exists
+          let manager = null;
+          if (branch.manager_id) {
+            const { data: managerData } = await supabase
+              .from("profiles")
+              .select("full_name, email")
+              .eq("id", branch.manager_id)
+              .single();
+            manager = managerData;
+          }
 
           return {
-            ...branch,
+            id: branch.id,
+            name: branch.name,
+            code: branch.code,
+            address: branch.address,
+            city: branch.city,
+            country: branch.country,
+            phone: branch.phone,
+            budget: branchBudget,
+            manager,
             departmentCount: deptCount || 0,
             assetCount: assetCount || 0,
             userCount: userCount || 0,
             monthlySpent,
             budgetUtilization,
-            remainingBudget: (branch.budget || 0) - monthlySpent,
+            remainingBudget: branchBudget - monthlySpent,
           };
         })
       );
+
+      // Filter by search term
+      if (searchTerm) {
+        return branchesWithMetrics.filter(branch => 
+          branch.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          branch.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          branch.address?.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+      }
 
       return branchesWithMetrics;
     },
@@ -105,9 +134,9 @@ export default function Branches() {
     queryFn: async () => {
       const { data: allBranches } = await supabase
         .from("branches")
-        .select("budget");
+        .select("*");
 
-      const totalBudget = allBranches?.reduce((sum, branch) => sum + (branch.budget || 0), 0) || 0;
+      const totalBudget = allBranches?.reduce((sum, branch: any) => sum + (branch.budget || 0), 0) || 0;
 
       const { count: totalDepartments } = await supabase
         .from("departments")
@@ -119,8 +148,7 @@ export default function Branches() {
 
       const { count: totalUsers } = await supabase
         .from("profiles")
-        .select("*", { count: "exact", head: true })
-        .not("branch_id", "is", null);
+        .select("*", { count: "exact", head: true });
 
       return {
         totalBranches: allBranches?.length || 0,
@@ -141,8 +169,8 @@ export default function Branches() {
 
   const getBudgetStatus = (utilization: number) => {
     if (utilization >= 100) return { status: "Over Budget", color: "destructive" };
-    if (utilization >= 80) return { status: "Near Limit", color: "warning" };
-    return { status: "On Track", color: "success" };
+    if (utilization >= 80) return { status: "Near Limit", color: "secondary" };
+    return { status: "On Track", color: "default" };
   };
 
   return (
@@ -222,7 +250,7 @@ export default function Branches() {
           <CardContent>
             <div className="text-2xl font-bold">{branchStats?.totalUsers || 0}</div>
             <p className="text-xs text-muted-foreground">
-              Branch employees
+              Total employees
             </p>
           </CardContent>
         </Card>
@@ -293,7 +321,7 @@ export default function Branches() {
                         <Building className="h-5 w-5" />
                         {branch.name}
                       </CardTitle>
-                      <Badge variant="outline">{branch.code}</Badge>
+                      {branch.code && <Badge variant="outline">{branch.code}</Badge>}
                     </div>
                     <div className="flex gap-1">
                       <Button variant="ghost" size="sm">
@@ -357,7 +385,7 @@ export default function Branches() {
                   </div>
 
                   {/* Budget Progress */}
-                  {branch.budget && (
+                  {branch.budget && branch.budget > 0 && (
                     <div className="space-y-2">
                       <div className="flex justify-between text-sm">
                         <span>Monthly Budget</span>
