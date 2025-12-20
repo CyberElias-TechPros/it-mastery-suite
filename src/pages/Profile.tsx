@@ -22,14 +22,6 @@ export default function Profile() {
     department: profile?.department || "",
   });
 
-  const { data: branches } = useQuery({
-    queryKey: ["branches"],
-    queryFn: async () => {
-      const { data } = await supabase.from("branches").select("*");
-      return data || [];
-    },
-  });
-
   const { data: departments } = useQuery({
     queryKey: ["departments"],
     queryFn: async () => {
@@ -84,7 +76,7 @@ export default function Profile() {
           </CardHeader>
           <CardContent className="flex flex-col items-center space-y-4">
             <Avatar className="h-24 w-24">
-              <AvatarImage src={profile.avatar_url} />
+              <AvatarImage src={profile.avatar_url || undefined} />
               <AvatarFallback>
                 <User className="h-12 w-12" />
               </AvatarFallback>
@@ -179,13 +171,13 @@ export default function Profile() {
             <div>
               <Label className="text-sm font-medium">Member Since</Label>
               <p className="text-sm text-muted-foreground">
-                {new Date(profile.created_at).toLocaleDateString()}
+                {profile.created_at ? new Date(profile.created_at).toLocaleDateString() : "N/A"}
               </p>
             </div>
             <div>
               <Label className="text-sm font-medium">Last Updated</Label>
               <p className="text-sm text-muted-foreground">
-                {new Date(profile.updated_at).toLocaleDateString()}
+                {profile.updated_at ? new Date(profile.updated_at).toLocaleDateString() : "N/A"}
               </p>
             </div>
           </div>
