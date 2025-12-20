@@ -17,7 +17,8 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Save, BookOpen } from "lucide-react";
+import { ArrowLeft, Save, BookOpen, FileText } from "lucide-react";
+import MarkdownEditor from "@/components/MarkdownEditor";
 
 export default function NewKBArticle() {
   const navigate = useNavigate();
@@ -157,17 +158,14 @@ export default function NewKBArticle() {
 
                 <div className="space-y-2">
                   <Label htmlFor="content">Content *</Label>
-                  <Textarea
-                    id="content"
+                  <MarkdownEditor
                     value={formData.content}
-                    onChange={(e) => handleInputChange("content", e.target.value)}
-                    placeholder="Write your article content here. You can use Markdown formatting."
-                    rows={20}
-                    required
-                    className="font-mono text-sm"
+                    onChange={(value) => handleInputChange("content", value)}
+                    placeholder="Write your article content here using Markdown..."
+                    height={400}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Supports Markdown formatting. Use **bold**, *italic*, `code`, and more.
+                    Use the toolbar for formatting or write Markdown directly. Switch to Preview tab to see how it looks.
                   </p>
                 </div>
               </CardContent>
