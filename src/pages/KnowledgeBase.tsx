@@ -77,7 +77,7 @@ export default function KnowledgeBase() {
           *,
           author_profile:profiles!kb_articles_author_id_fkey(full_name, avatar_url)
         `)
-        .eq("is_featured", true)
+        .eq("is_featured", true as unknown as boolean)
         .eq("is_published", true)
         .order("updated_at", { ascending: false })
         .limit(3);

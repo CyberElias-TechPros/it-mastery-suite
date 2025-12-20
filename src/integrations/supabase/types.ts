@@ -341,6 +341,44 @@ export type Database = {
           },
         ]
       }
+      custom_reports: {
+        Row: {
+          config: Json | null
+          created_at: string | null
+          created_by: string | null
+          description: string | null
+          id: string
+          name: string
+          updated_at: string | null
+        }
+        Insert: {
+          config?: Json | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          name: string
+          updated_at?: string | null
+        }
+        Update: {
+          config?: Json | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          name?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "custom_reports_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       departments: {
         Row: {
           branch_id: string | null
@@ -555,6 +593,7 @@ export type Database = {
           content: string
           created_at: string | null
           id: string
+          is_featured: boolean | null
           is_published: boolean | null
           tags: string[] | null
           title: string
@@ -567,6 +606,7 @@ export type Database = {
           content: string
           created_at?: string | null
           id?: string
+          is_featured?: boolean | null
           is_published?: boolean | null
           tags?: string[] | null
           title: string
@@ -579,6 +619,7 @@ export type Database = {
           content?: string
           created_at?: string | null
           id?: string
+          is_featured?: boolean | null
           is_published?: boolean | null
           tags?: string[] | null
           title?: string
@@ -589,6 +630,84 @@ export type Database = {
           {
             foreignKeyName: "kb_articles_author_id_fkey"
             columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_comments: {
+        Row: {
+          article_id: string
+          comment: string
+          created_at: string | null
+          id: string
+          user_id: string
+        }
+        Insert: {
+          article_id: string
+          comment: string
+          created_at?: string | null
+          id?: string
+          user_id: string
+        }
+        Update: {
+          article_id?: string
+          comment?: string
+          created_at?: string | null
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_comments_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "kb_articles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_comments_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_ratings: {
+        Row: {
+          article_id: string
+          created_at: string | null
+          id: string
+          rating: number
+          user_id: string
+        }
+        Insert: {
+          article_id: string
+          created_at?: string | null
+          id?: string
+          rating: number
+          user_id: string
+        }
+        Update: {
+          article_id?: string
+          created_at?: string | null
+          id?: string
+          rating?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_ratings_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "kb_articles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_ratings_user_id_fkey"
+            columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -696,6 +815,76 @@ export type Database = {
             columns: ["department_id"]
             isOneToOne: false
             referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      purchase_orders: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string | null
+          description: string | null
+          id: string
+          notes: string | null
+          po_number: string
+          requested_by: string | null
+          status: string | null
+          title: string
+          total_amount: number | null
+          updated_at: string | null
+          vendor_id: string | null
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          notes?: string | null
+          po_number: string
+          requested_by?: string | null
+          status?: string | null
+          title: string
+          total_amount?: number | null
+          updated_at?: string | null
+          vendor_id?: string | null
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          notes?: string | null
+          po_number?: string
+          requested_by?: string | null
+          status?: string | null
+          title?: string
+          total_amount?: number | null
+          updated_at?: string | null
+          vendor_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_orders_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
         ]
@@ -832,6 +1021,7 @@ export type Database = {
       vendors: {
         Row: {
           address: string | null
+          category: string | null
           contact_person: string | null
           contract_end_date: string | null
           contract_start_date: string | null
@@ -842,12 +1032,14 @@ export type Database = {
           name: string
           notes: string | null
           phone: string | null
+          rating: number | null
           service_type: string | null
           updated_at: string | null
           website: string | null
         }
         Insert: {
           address?: string | null
+          category?: string | null
           contact_person?: string | null
           contract_end_date?: string | null
           contract_start_date?: string | null
@@ -858,12 +1050,14 @@ export type Database = {
           name: string
           notes?: string | null
           phone?: string | null
+          rating?: number | null
           service_type?: string | null
           updated_at?: string | null
           website?: string | null
         }
         Update: {
           address?: string | null
+          category?: string | null
           contact_person?: string | null
           contract_end_date?: string | null
           contract_start_date?: string | null
@@ -874,6 +1068,7 @@ export type Database = {
           name?: string
           notes?: string | null
           phone?: string | null
+          rating?: number | null
           service_type?: string | null
           updated_at?: string | null
           website?: string | null
@@ -893,6 +1088,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      increment_view_count: { Args: { article_id: string }; Returns: undefined }
     }
     Enums: {
       asset_status: "active" | "inactive" | "maintenance" | "retired"

@@ -370,7 +370,7 @@ function EventForm({ onSuccess }: { onSuccess: () => void }) {
     description: "",
     start_date: "",
     end_date: "",
-    event_type: "meeting",
+    event_type: "meeting" as "meeting" | "maintenance" | "deadline" | "other",
     location: "",
   });
   const { user } = useAuth();
@@ -382,10 +382,10 @@ function EventForm({ onSuccess }: { onSuccess: () => void }) {
     try {
       const { error } = await supabase
         .from("calendar_events")
-        .insert({
+        .insert([{
           ...formData,
-          created_by: user?.id,
-        });
+          created_by: user?.id || '',
+        }]);
 
       if (error) throw error;
 
@@ -453,7 +453,7 @@ function EventForm({ onSuccess }: { onSuccess: () => void }) {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="event_type">Event Type</Label>
-          <Select value={formData.event_type} onValueChange={(value) => setFormData({ ...formData, event_type: value })}>
+          <Select value={formData.event_type} onValueChange={(value: "meeting" | "maintenance" | "deadline" | "other") => setFormData({ ...formData, event_type: value })}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>

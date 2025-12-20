@@ -37,7 +37,7 @@ export default function Vendors() {
         .order("name", { ascending: true });
 
       if (categoryFilter !== "all") {
-        query = query.eq("category", categoryFilter);
+        query = query.eq("service_type", categoryFilter);
       }
 
       if (searchTerm) {
@@ -72,7 +72,7 @@ export default function Vendors() {
 
   const getUniqueCategories = () => {
     if (!vendors) return [];
-    const categories = [...new Set(vendors.map(vendor => vendor.category).filter(Boolean))];
+    const categories = [...new Set(vendors.map(vendor => vendor.service_type).filter(Boolean))] as string[];
     return categories;
   };
 
@@ -261,10 +261,10 @@ export default function Vendors() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline">{vendor.category || "Uncategorized"}</Badge>
+                          <Badge variant="outline">{vendor.service_type || "Uncategorized"}</Badge>
                         </TableCell>
                         <TableCell>
-                          {renderStars(vendor.rating)}
+                          {renderStars(null)}
                         </TableCell>
                         <TableCell>
                           <Badge variant={contractStatus.color as any}>
