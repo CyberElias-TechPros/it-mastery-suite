@@ -1,14 +1,21 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Building, DollarSign, TrendingUp, TrendingDown, AlertTriangle, CheckCircle } from "lucide-react";
-import { format } from "date-fns";
+
+interface BudgetItem {
+  id: string;
+  name: string;
+  budget: number;
+  spent: number;
+  remaining: number;
+  utilization: number;
+  branch?: { name: string };
+}
 
 export default function Budgets() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -16,40 +23,30 @@ export default function Budgets() {
   const { data: budgets, isLoading } = useQuery({
     queryKey: ["budgets", selectedYear],
     queryFn: async () => {
-      // Get branches with budgets
-      const { data: branches, error: branchesError } = await supabase
+      // Get branches
+      const { data: branchData, error: branchesError } = await supabase
         .from("branches")
-        .select("*")
-        .not("budget", "is", null);
+        .select("*");
 
       if (branchesError) throw branchesError;
 
-      // Get departments with budgets
-      const { data: departments, error: deptsError } = await supabase
+      // Get departments
+      const { data: deptData, error: deptsError } = await supabase
         .from("departments")
-        .select(`
-          *,
-          branch:branches(name)
-        `)
-        .not("budget", "is", null);
+        .select("*");
 
       if (deptsError) throw deptsError;
 
       // Get expense data for the selected year
-      const startOfYear = new Date(selectedYear, 0, 1);
-      const endOfYear = new Date(selectedYear, 11, 31);
+      const startOfYear = new Date(selectedYear, 0, 1).toISOString().split('T')[0];
+      const endOfYear = new Date(selectedYear, 11, 31).toISOString().split('T')[0];
 
-      const { data: expenses, error: expensesError } = await supabase
+      const { data: expenseData, error: expensesError } = await supabase
         .from("expenses")
-        .select(`
-          amount,
-          branch_id,
-          department_id,
-          expense_date
-        `)
-        .gte("expense_date", startOfYear.toISOString())
-        .lte("expense_date", endOfYear.toISOString())
-        .not("approved_at", "is", null); // Only approved expenses
+        .select("*")
+        .gte("expense_date", startOfYear)
+        .lte("expense_date", endOfYear)
+        .not("approved_at", "is", null);
 
       if (expensesError) throw expensesError;
 
@@ -57,7 +54,7 @@ export default function Budgets() {
       const branchSpending = new Map<string, number>();
       const departmentSpending = new Map<string, number>();
 
-      expenses?.forEach(expense => {
+      (expenseData || []).forEach((expense: any) => {
         if (expense.branch_id) {
           const current = branchSpending.get(expense.branch_id) || 0;
           branchSpending.set(expense.branch_id, current + (expense.amount || 0));
@@ -68,19 +65,43 @@ export default function Budgets() {
         }
       });
 
+      // Filter branches and departments that have budgets
+      const branchesWithBudgets: BudgetItem[] = (branchData || [])
+        .filter((branch: any) => branch.budget && branch.budget > 0)
+        .map((branch: any) => {
+          const spent = branchSpending.get(branch.id) || 0;
+          const budget = branch.budget || 0;
+          return {
+            id: branch.id,
+            name: branch.name,
+            budget,
+            spent,
+            remaining: budget - spent,
+            utilization: budget > 0 ? (spent / budget) * 100 : 0,
+          };
+        });
+
+      const departmentsWithBudgets: BudgetItem[] = (deptData || [])
+        .filter((dept: any) => dept.budget && dept.budget > 0)
+        .map((dept: any) => {
+          const spent = departmentSpending.get(dept.id) || 0;
+          const budget = dept.budget || 0;
+          // Get branch name
+          const branch = branchData?.find((b: any) => b.id === dept.branch_id);
+          return {
+            id: dept.id,
+            name: dept.name,
+            budget,
+            spent,
+            remaining: budget - spent,
+            utilization: budget > 0 ? (spent / budget) * 100 : 0,
+            branch: branch ? { name: branch.name } : undefined,
+          };
+        });
+
       return {
-        branches: branches?.map(branch => ({
-          ...branch,
-          spent: branchSpending.get(branch.id) || 0,
-          remaining: (branch.budget || 0) - (branchSpending.get(branch.id) || 0),
-          utilization: ((branchSpending.get(branch.id) || 0) / (branch.budget || 1)) * 100,
-        })) || [],
-        departments: departments?.map(dept => ({
-          ...dept,
-          spent: departmentSpending.get(dept.id) || 0,
-          remaining: (dept.budget || 0) - (departmentSpending.get(dept.id) || 0),
-          utilization: ((departmentSpending.get(dept.id) || 0) / (dept.budget || 1)) * 100,
-        })) || [],
+        branches: branchesWithBudgets,
+        departments: departmentsWithBudgets,
       };
     },
   });
@@ -94,8 +115,8 @@ export default function Budgets() {
 
   const getBudgetStatus = (utilization: number) => {
     if (utilization >= 100) return { status: "over", color: "destructive", icon: AlertTriangle };
-    if (utilization >= 80) return { status: "warning", color: "warning", icon: AlertTriangle };
-    return { status: "good", color: "success", icon: CheckCircle };
+    if (utilization >= 80) return { status: "warning", color: "secondary", icon: AlertTriangle };
+    return { status: "good", color: "default", icon: CheckCircle };
   };
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
@@ -103,6 +124,18 @@ export default function Budgets() {
   if (isLoading) {
     return <div className="flex justify-center p-8">Loading budgets...</div>;
   }
+
+  const totalBudget = (budgets?.branches?.reduce((sum, b) => sum + b.budget, 0) || 0) +
+    (budgets?.departments?.reduce((sum, d) => sum + d.budget, 0) || 0);
+  const totalSpent = (budgets?.branches?.reduce((sum, b) => sum + b.spent, 0) || 0) +
+    (budgets?.departments?.reduce((sum, d) => sum + d.spent, 0) || 0);
+  const totalRemaining = (budgets?.branches?.reduce((sum, b) => sum + b.remaining, 0) || 0) +
+    (budgets?.departments?.reduce((sum, d) => sum + d.remaining, 0) || 0);
+  const itemCount = (budgets?.branches?.length || 0) + (budgets?.departments?.length || 0);
+  const avgUtilization = itemCount > 0 
+    ? ((budgets?.branches?.reduce((sum, b) => sum + b.utilization, 0) || 0) +
+       (budgets?.departments?.reduce((sum, d) => sum + d.utilization, 0) || 0)) / itemCount
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -134,12 +167,7 @@ export default function Budgets() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(
-                (budgets?.branches?.reduce((sum, b) => sum + (b.budget || 0), 0) || 0) +
-                (budgets?.departments?.reduce((sum, d) => sum + (d.budget || 0), 0) || 0)
-              )}
-            </div>
+            <div className="text-2xl font-bold">{formatCurrency(totalBudget)}</div>
             <p className="text-xs text-muted-foreground">
               Across all branches & departments
             </p>
@@ -152,12 +180,7 @@ export default function Budgets() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(
-                (budgets?.branches?.reduce((sum, b) => sum + b.spent, 0) || 0) +
-                (budgets?.departments?.reduce((sum, d) => sum + d.spent, 0) || 0)
-              )}
-            </div>
+            <div className="text-2xl font-bold">{formatCurrency(totalSpent)}</div>
             <p className="text-xs text-muted-foreground">
               Approved expenses in {selectedYear}
             </p>
@@ -170,12 +193,7 @@ export default function Budgets() {
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(
-                (budgets?.branches?.reduce((sum, b) => sum + b.remaining, 0) || 0) +
-                (budgets?.departments?.reduce((sum, d) => sum + d.remaining, 0) || 0)
-              )}
-            </div>
+            <div className="text-2xl font-bold">{formatCurrency(totalRemaining)}</div>
             <p className="text-xs text-muted-foreground">
               Available for spending
             </p>
@@ -188,13 +206,7 @@ export default function Budgets() {
             <Building className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {Math.round(
-                ((budgets?.branches?.reduce((sum, b) => sum + b.utilization, 0) || 0) +
-                 (budgets?.departments?.reduce((sum, d) => sum + d.utilization, 0) || 0)) /
-                ((budgets?.branches?.length || 0) + (budgets?.departments?.length || 0) || 1)
-              )}%
-            </div>
+            <div className="text-2xl font-bold">{Math.round(avgUtilization)}%</div>
             <p className="text-xs text-muted-foreground">
               Budget utilization rate
             </p>
@@ -232,7 +244,7 @@ export default function Budgets() {
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-medium">
-                          {formatCurrency(branch.spent)} / {formatCurrency(branch.budget || 0)}
+                          {formatCurrency(branch.spent)} / {formatCurrency(branch.budget)}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {formatCurrency(branch.remaining)} remaining
@@ -275,7 +287,7 @@ export default function Budgets() {
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold">{dept.name}</h3>
-                        <Badge variant="outline">{dept.branch?.name}</Badge>
+                        {dept.branch && <Badge variant="outline">{dept.branch.name}</Badge>}
                         <Badge variant={budgetStatus.color as any}>
                           <StatusIcon className="mr-1 h-3 w-3" />
                           {budgetStatus.status === "over" ? "Over Budget" :
@@ -284,7 +296,7 @@ export default function Budgets() {
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-medium">
-                          {formatCurrency(dept.spent)} / {formatCurrency(dept.budget || 0)}
+                          {formatCurrency(dept.spent)} / {formatCurrency(dept.budget)}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {formatCurrency(dept.remaining)} remaining

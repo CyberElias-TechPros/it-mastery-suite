@@ -1,13 +1,13 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import type { User as SupabaseUser, Session } from "@supabase/supabase-js";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 interface Profile {
   id: string;
   email: string;
   full_name: string | null;
-  role: string;
+  role: "admin" | "technician" | "employee";
   phone?: string | null;
   department?: string | null;
   avatar_url?: string | null;
@@ -24,7 +24,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
-  updateProfile: (updates: Partial<Profile>) => Promise<{ error: any }>;
+  updateProfile: (updates: Partial<Omit<Profile, 'id' | 'email' | 'role'>>) => Promise<{ error: any }>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -46,7 +46,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (error) throw error;
       if (data) {
-        setProfile(data as Profile);
+        setProfile({
+          id: data.id,
+          email: data.email,
+          full_name: data.full_name,
+          role: data.role as "admin" | "technician" | "employee",
+          phone: data.phone,
+          department: data.department,
+          avatar_url: data.avatar_url,
+          created_at: data.created_at,
+          updated_at: data.updated_at,
+        });
       }
     } catch (error) {
       console.error("Error fetching profile:", error);
@@ -121,13 +131,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const updateProfile = async (updates: Partial<Profile>) => {
+  const updateProfile = async (updates: Partial<Omit<Profile, 'id' | 'email' | 'role'>>) => {
     if (!user) return { error: "Not authenticated" };
     
     try {
       const { error } = await supabase
         .from("profiles")
-        .update(updates)
+        .update({
+          full_name: updates.full_name,
+          phone: updates.phone,
+          department: updates.department,
+          avatar_url: updates.avatar_url,
+        })
         .eq("id", user.id);
 
       if (error) throw error;

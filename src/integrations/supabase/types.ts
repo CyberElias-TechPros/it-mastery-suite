@@ -99,38 +99,184 @@ export type Database = {
           },
         ]
       }
+      attachments: {
+        Row: {
+          created_at: string | null
+          file_name: string
+          file_path: string
+          file_size: number | null
+          id: string
+          mime_type: string | null
+          resource_id: string
+          resource_type: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          file_name: string
+          file_path: string
+          file_size?: number | null
+          id?: string
+          mime_type?: string | null
+          resource_id: string
+          resource_type: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          file_name?: string
+          file_path?: string
+          file_size?: number | null
+          id?: string
+          mime_type?: string | null
+          resource_id?: string
+          resource_type?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attachments_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      automation_executions: {
+        Row: {
+          error_message: string | null
+          executed_at: string | null
+          id: string
+          result: Json | null
+          rule_id: string | null
+          status: string | null
+          trigger_data: Json | null
+        }
+        Insert: {
+          error_message?: string | null
+          executed_at?: string | null
+          id?: string
+          result?: Json | null
+          rule_id?: string | null
+          status?: string | null
+          trigger_data?: Json | null
+        }
+        Update: {
+          error_message?: string | null
+          executed_at?: string | null
+          id?: string
+          result?: Json | null
+          rule_id?: string | null
+          status?: string | null
+          trigger_data?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_executions_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "automation_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      automation_rules: {
+        Row: {
+          actions: Json | null
+          conditions: Json | null
+          created_at: string | null
+          created_by: string | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          trigger_event: string
+          updated_at: string | null
+        }
+        Insert: {
+          actions?: Json | null
+          conditions?: Json | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          trigger_event: string
+          updated_at?: string | null
+        }
+        Update: {
+          actions?: Json | null
+          conditions?: Json | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          trigger_event?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_rules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       branches: {
         Row: {
           address: string | null
+          budget: number | null
           city: string | null
+          code: string | null
           country: string | null
           created_at: string | null
           id: string
+          manager_id: string | null
           name: string
           phone: string | null
           updated_at: string | null
         }
         Insert: {
           address?: string | null
+          budget?: number | null
           city?: string | null
+          code?: string | null
           country?: string | null
           created_at?: string | null
           id?: string
+          manager_id?: string | null
           name: string
           phone?: string | null
           updated_at?: string | null
         }
         Update: {
           address?: string | null
+          budget?: number | null
           city?: string | null
+          code?: string | null
           country?: string | null
           created_at?: string | null
           id?: string
+          manager_id?: string | null
           name?: string
           phone?: string | null
           updated_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "branches_manager_id_fkey"
+            columns: ["manager_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       calendar_events: {
         Row: {
@@ -198,6 +344,7 @@ export type Database = {
       departments: {
         Row: {
           branch_id: string | null
+          budget: number | null
           created_at: string | null
           id: string
           manager_id: string | null
@@ -206,6 +353,7 @@ export type Database = {
         }
         Insert: {
           branch_id?: string | null
+          budget?: number | null
           created_at?: string | null
           id?: string
           manager_id?: string | null
@@ -214,6 +362,7 @@ export type Database = {
         }
         Update: {
           branch_id?: string | null
+          budget?: number | null
           created_at?: string | null
           id?: string
           manager_id?: string | null
@@ -308,6 +457,7 @@ export type Database = {
           amount: number
           approved_at: string | null
           approved_by: string | null
+          branch_id: string | null
           category: string | null
           created_at: string | null
           department_id: string | null
@@ -326,6 +476,7 @@ export type Database = {
           amount: number
           approved_at?: string | null
           approved_by?: string | null
+          branch_id?: string | null
           category?: string | null
           created_at?: string | null
           department_id?: string | null
@@ -344,6 +495,7 @@ export type Database = {
           amount?: number
           approved_at?: string | null
           approved_by?: string | null
+          branch_id?: string | null
           category?: string | null
           created_at?: string | null
           department_id?: string | null
@@ -364,6 +516,13 @@ export type Database = {
             columns: ["approved_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
             referencedColumns: ["id"]
           },
           {
@@ -487,8 +646,10 @@ export type Database = {
       profiles: {
         Row: {
           avatar_url: string | null
+          branch_id: string | null
           created_at: string
           department: string | null
+          department_id: string | null
           email: string
           full_name: string | null
           id: string
@@ -498,8 +659,10 @@ export type Database = {
         }
         Insert: {
           avatar_url?: string | null
+          branch_id?: string | null
           created_at?: string
           department?: string | null
+          department_id?: string | null
           email: string
           full_name?: string | null
           id: string
@@ -509,8 +672,10 @@ export type Database = {
         }
         Update: {
           avatar_url?: string | null
+          branch_id?: string | null
           created_at?: string
           department?: string | null
+          department_id?: string | null
           email?: string
           full_name?: string | null
           id?: string
@@ -518,7 +683,22 @@ export type Database = {
           role?: Database["public"]["Enums"]["user_role"]
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profiles_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       ticket_comments: {
         Row: {

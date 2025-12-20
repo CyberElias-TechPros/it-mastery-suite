@@ -50,12 +50,14 @@ export function FileUpload({
 
     setUploading(true);
     try {
+      const user = await supabase.auth.getUser();
+      
       const uploadPromises = selectedFiles.map(async (file) => {
         // Create a unique file name
         const fileExt = file.name.split('.').pop();
         const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
 
-        // Upload to Supabase Storage (you'll need to create a bucket called 'attachments')
+        // Upload to Supabase Storage
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('attachments')
           .upload(fileName, file);
@@ -69,7 +71,7 @@ export function FileUpload({
 
         // Save file metadata to database
         const { data: fileData, error: dbError } = await supabase
-          .from('attachments')
+          .from('attachments' as any)
           .insert({
             file_name: file.name,
             file_path: publicUrl,
@@ -77,8 +79,8 @@ export function FileUpload({
             mime_type: file.type,
             resource_type: resourceType,
             resource_id: resourceId,
-            uploaded_by: (await supabase.auth.getUser()).data.user?.id,
-          })
+            uploaded_by: user.data.user?.id,
+          } as any)
           .select()
           .single();
 

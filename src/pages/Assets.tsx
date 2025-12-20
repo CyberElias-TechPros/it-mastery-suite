@@ -21,16 +21,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Search, Filter, Package, Wrench, Archive, Trash2 } from "lucide-react";
+import { Plus, Search, Package, Wrench, Archive, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 
 export default function Assets() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [typeFilter, setTypeFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
 
   const { data: assets, isLoading } = useQuery({
-    queryKey: ["assets", searchTerm, statusFilter, typeFilter],
+    queryKey: ["assets", searchTerm, statusFilter, categoryFilter],
     queryFn: async () => {
       let query = supabase
         .from("assets")
@@ -43,11 +43,11 @@ export default function Assets() {
         .order("created_at", { ascending: false });
 
       if (statusFilter !== "all") {
-        query = query.eq("status", statusFilter as any);
+        query = query.eq("status", statusFilter as "active" | "inactive" | "maintenance" | "retired");
       }
 
-      if (typeFilter !== "all") {
-        query = query.eq("type", typeFilter as any);
+      if (categoryFilter !== "all") {
+        query = query.eq("category", categoryFilter);
       }
 
       if (searchTerm) {
@@ -58,7 +58,7 @@ export default function Assets() {
 
       const { data, error } = await query;
       if (error) throw error;
-      return data;
+      return data || [];
     },
   });
 
@@ -66,11 +66,11 @@ export default function Assets() {
     switch (status) {
       case "active":
         return "default";
-      case "in_maintenance":
-        return "warning";
-      case "retired":
+      case "maintenance":
         return "secondary";
-      case "disposed":
+      case "inactive":
+        return "outline";
+      case "retired":
         return "destructive";
       default:
         return "outline";
@@ -81,11 +81,11 @@ export default function Assets() {
     switch (status) {
       case "active":
         return Package;
-      case "in_maintenance":
+      case "maintenance":
         return Wrench;
-      case "retired":
+      case "inactive":
         return Archive;
-      case "disposed":
+      case "retired":
         return Trash2;
       default:
         return Package;
@@ -129,23 +129,23 @@ export default function Assets() {
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="in_maintenance">In Maintenance</SelectItem>
+                <SelectItem value="maintenance">Maintenance</SelectItem>
+                <SelectItem value="inactive">Inactive</SelectItem>
                 <SelectItem value="retired">Retired</SelectItem>
-                <SelectItem value="disposed">Disposed</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
               <SelectTrigger>
-                <SelectValue placeholder="Filter by type" />
+                <SelectValue placeholder="Filter by category" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
+                <SelectItem value="all">All Categories</SelectItem>
                 <SelectItem value="laptop">Laptop</SelectItem>
                 <SelectItem value="desktop">Desktop</SelectItem>
                 <SelectItem value="server">Server</SelectItem>
                 <SelectItem value="printer">Printer</SelectItem>
-                <SelectItem value="mobile_device">Mobile Device</SelectItem>
-                <SelectItem value="software_license">Software License</SelectItem>
+                <SelectItem value="network">Network Equipment</SelectItem>
+                <SelectItem value="mobile">Mobile Device</SelectItem>
                 <SelectItem value="other">Other</SelectItem>
               </SelectContent>
             </Select>
@@ -168,7 +168,7 @@ export default function Assets() {
                   <TableRow>
                     <TableHead>Asset Tag</TableHead>
                     <TableHead>Name</TableHead>
-                    <TableHead>Type</TableHead>
+                    <TableHead>Category</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Assigned To</TableHead>
                     <TableHead>Department</TableHead>
@@ -189,11 +189,11 @@ export default function Assets() {
                           </Link>
                         </TableCell>
                         <TableCell className="font-medium">{asset.name}</TableCell>
-                        <TableCell className="capitalize">{asset.type.replace("_", " ")}</TableCell>
+                        <TableCell className="capitalize">{asset.category?.replace("_", " ") || "N/A"}</TableCell>
                         <TableCell>
                           <Badge variant={getStatusColor(asset.status) as any} className="capitalize">
                             <StatusIcon className="mr-1 h-3 w-3" />
-                            {asset.status.replace("_", " ")}
+                            {asset.status?.replace("_", " ") || "unknown"}
                           </Badge>
                         </TableCell>
                         <TableCell>{asset.assigned_to_profile?.full_name || "Unassigned"}</TableCell>
