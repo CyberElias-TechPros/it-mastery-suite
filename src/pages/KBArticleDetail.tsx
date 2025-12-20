@@ -326,9 +326,9 @@ export default function KBArticleDetail() {
                   </p>
                 </div>
                 <div className="flex items-center gap-4">
-                  {renderStars(article.rating)}
+                  {renderStars(null)}
                   <div className="text-sm text-muted-foreground">
-                    {article.rating ? `${article.rating}/5` : "No ratings yet"}
+                    No ratings yet
                   </div>
                 </div>
               </div>
