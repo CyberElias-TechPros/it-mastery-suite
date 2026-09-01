@@ -1,299 +1,262 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Plus, Search, BookOpen, Star, MessageSquare, Eye, Clock, User } from "lucide-react";
-import { format } from "date-fns";
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { BookOpen, Eye, MessageSquare, Plus, Search, Star } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DataPagination } from '@/components/DataPagination';
+import { useDebounce } from '@/hooks/use-debounce';
+import { useAuth } from '@/contexts/AuthContext';
+import { api, type PageMeta } from '@/lib/api';
+import { formatNumber, formatRelative } from '@/lib/format';
+
+interface Article {
+  id: string;
+  title: string;
+  content: string;
+  category: string | null;
+  tags: string[];
+  author_id: string;
+  author_name: string | null;
+  is_featured: boolean;
+  is_published: boolean;
+  view_count: number;
+  comment_count: number;
+  rating: number | null;
+  rating_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CategoryRow {
+  category: string;
+  total: number;
+}
+
+interface KbStats {
+  total_articles: number;
+  total_views: number;
+  featured: number;
+}
+
+const ALL = 'all';
+
+function Stars({ rating }: { rating: number | null }) {
+  if (!rating) return <span className="text-xs text-muted-foreground">Not rated yet</span>;
+  return (
+    <span className="flex items-center gap-0.5" aria-label={`Rated ${rating} out of 5`}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star
+          key={star}
+          className={`h-3 w-3 ${star <= Math.round(rating) ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground/40'}`}
+        />
+      ))}
+      <span className="ml-1 text-xs text-muted-foreground">{rating.toFixed(1)}</span>
+    </span>
+  );
+}
+
+function ArticleCard({ article }: { article: Article }) {
+  return (
+    <Card className="flex h-full flex-col transition-shadow hover:shadow-md">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="text-base">
+            <Link to={`/knowledge-base/${article.id}`} className="hover:underline">
+              {article.title}
+            </Link>
+          </CardTitle>
+          <div className="flex shrink-0 gap-1">
+            {article.is_featured ? <Badge>Featured</Badge> : null}
+            {!article.is_published ? <Badge variant="outline">Draft</Badge> : null}
+          </div>
+        </div>
+        <CardDescription>
+          {article.category ?? 'Uncategorised'} · updated {formatRelative(article.updated_at)}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-1 flex-col justify-between gap-3">
+        <p className="line-clamp-3 text-sm text-muted-foreground">
+          {article.content.replace(/[#*`>_-]/g, '').slice(0, 200)}
+        </p>
+        {article.tags.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {article.tags.slice(0, 4).map((tag) => (
+              <Badge key={tag} variant="secondary" className="text-xs">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span className="flex items-center gap-3">
+            <span className="flex items-center gap-1">
+              <Eye className="h-3 w-3" />
+              {formatNumber(article.view_count)}
+            </span>
+            <span className="flex items-center gap-1">
+              <MessageSquare className="h-3 w-3" />
+              {formatNumber(article.comment_count)}
+            </span>
+          </span>
+          <Stars rating={article.rating} />
+        </div>
+        <p className="text-xs text-muted-foreground">By {article.author_name ?? 'Unknown'}</p>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function KnowledgeBase() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("updated_at");
+  const { isStaff } = useAuth();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [category, setCategory] = useState(ALL);
+  const [sort, setSort] = useState<'updated_at' | 'view_count' | 'title'>('updated_at');
+  const [page, setPage] = useState(1);
+  const search = useDebounce(searchTerm, 300);
 
-  const { data: articles, isLoading } = useQuery({
-    queryKey: ["kb-articles", searchTerm, categoryFilter, sortBy],
-    queryFn: async () => {
-      let query = supabase
-        .from("kb_articles")
-        .select(`
-          *,
-          author_profile:profiles!kb_articles_author_id_fkey(full_name, avatar_url)
-        `)
-        .eq("is_published", true)
-        .order(sortBy === "view_count" ? "view_count" : "updated_at", {
-          ascending: sortBy === "title" ? true : false
-        });
+  useEffect(() => setPage(1), [search, category, sort]);
 
-      if (categoryFilter !== "all") {
-        query = query.eq("category", categoryFilter);
-      }
-
-      if (searchTerm) {
-        query = query.or(
-          `title.ilike.%${searchTerm}%,content.ilike.%${searchTerm}%`
-        );
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return data;
-    },
+  const { data, isLoading } = useQuery({
+    queryKey: ['kb-articles', search, category, sort, page],
+    queryFn: () =>
+      api.getPage<Article[]>('/knowledge-base', {
+        page,
+        pageSize: 12,
+        search: search || undefined,
+        category: category === ALL ? undefined : category,
+        sort,
+        direction: sort === 'title' ? 'asc' : 'desc',
+      }),
   });
 
-  const { data: categories } = useQuery({
-    queryKey: ["kb-categories"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("kb_articles")
-        .select("category")
-        .not("category", "is", null);
-
-      if (error) throw error;
-
-      // Get unique categories
-      const uniqueCategories = [...new Set(data.map(item => item.category))];
-      return uniqueCategories.filter(Boolean);
-    },
+  const { data: categories = [] } = useQuery({
+    queryKey: ['kb-categories'],
+    queryFn: () => api.get<CategoryRow[]>('/knowledge-base/categories'),
   });
 
-  const { data: featuredArticles } = useQuery({
-    queryKey: ["featured-articles"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("kb_articles")
-        .select(`
-          *,
-          author_profile:profiles!kb_articles_author_id_fkey(full_name, avatar_url)
-        `)
-        .eq("is_featured", true as unknown as boolean)
-        .eq("is_published", true)
-        .order("updated_at", { ascending: false })
-        .limit(3);
+  const { data: stats } = useQuery({ queryKey: ['kb-stats'], queryFn: () => api.get<KbStats>('/knowledge-base/stats') });
 
-      if (error) throw error;
-      return data || [];
-    },
+  const { data: featured } = useQuery({
+    queryKey: ['kb-featured'],
+    queryFn: () => api.getPage<Article[]>('/knowledge-base', { featured: 'true', pageSize: 3 }),
   });
 
-  const getUniqueCategories = () => {
-    return categories || [];
-  };
-
-  const renderStars = (rating: number | null) => {
-    if (!rating) return null;
-    return (
-      <div className="flex items-center gap-1">
-        {[1, 2, 3, 4, 5].map((star) => (
-          <Star
-            key={star}
-            className={`h-3 w-3 ${
-              star <= rating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"
-            }`}
-          />
-        ))}
-        <span className="text-xs text-muted-foreground ml-1">({rating})</span>
-      </div>
-    );
-  };
+  const articles = data?.data ?? [];
+  const meta: PageMeta | undefined = data?.meta;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold">Knowledge Base</h1>
-          <p className="text-muted-foreground">IT documentation and procedures</p>
+          <h1 className="text-3xl font-bold">Knowledge base</h1>
+          <p className="text-muted-foreground">IT documentation, procedures and how-tos</p>
         </div>
-        <Link to="/knowledge-base/new">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            New Article
+        {isStaff ? (
+          <Button asChild>
+            <Link to="/knowledge-base/new">
+              <Plus className="mr-2 h-4 w-4" />
+              New article
+            </Link>
           </Button>
-        </Link>
+        ) : null}
       </div>
 
-      {/* Featured Articles */}
-      {featuredArticles && featuredArticles.length > 0 && (
+      <div className="grid gap-4 md:grid-cols-3">
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Star className="h-5 w-5 text-yellow-500" />
-              Featured Articles
-            </CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Published articles</CardTitle>
+            <BookOpen className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 md:grid-cols-3">
-              {featuredArticles.map((article: any) => (
-                <Link key={article.id} to={`/knowledge-base/${article.id}`}>
-                  <Card className="hover:shadow-md transition-shadow cursor-pointer">
-                    <CardContent className="p-4">
-                      <div className="space-y-2">
-                        <h3 className="font-semibold line-clamp-2">{article.title}</h3>
-                        <p className="text-sm text-muted-foreground line-clamp-2">
-                          {article.content.replace(/<[^>]*>/g, '').substring(0, 100)}...
-                        </p>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Eye className="h-3 w-3" />
-                          {article.view_count || 0} views
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              ))}
-            </div>
+            <div className="text-2xl font-bold">{formatNumber(stats?.total_articles)}</div>
           </CardContent>
         </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total views</CardTitle>
+            <Eye className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatNumber(stats?.total_views)}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Featured</CardTitle>
+            <Star className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatNumber(stats?.featured)}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {featured && featured.data.length > 0 ? (
+        <section className="space-y-3">
+          <h2 className="text-xl font-semibold">Featured</h2>
+          <div className="grid gap-4 md:grid-cols-3">
+            {featured.data.map((article) => (
+              <ArticleCard key={article.id} article={article} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <div className="flex flex-wrap gap-3">
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search articles"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            className="pl-8"
+            aria-label="Search articles"
+          />
+        </div>
+        <Select value={category} onValueChange={setCategory}>
+          <SelectTrigger className="w-48" aria-label="Filter by category">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>All categories</SelectItem>
+            {categories.map((row) => (
+              <SelectItem key={row.category} value={row.category}>
+                {row.category} ({row.total})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={sort} onValueChange={(value) => setSort(value as typeof sort)}>
+          <SelectTrigger className="w-44" aria-label="Sort articles">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="updated_at">Recently updated</SelectItem>
+            <SelectItem value="view_count">Most viewed</SelectItem>
+            <SelectItem value="title">Title A–Z</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {isLoading ? (
+        <p className="p-8 text-center text-muted-foreground">Loading articles…</p>
+      ) : articles.length === 0 ? (
+        <Card>
+          <CardContent className="p-10 text-center text-muted-foreground">No articles match your filters.</CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {articles.map((article) => (
+            <ArticleCard key={article.id} article={article} />
+          ))}
+        </div>
       )}
 
-      {/* Filters and Search */}
-      <Card>
-        <CardHeader>
-          <CardTitle>All Articles</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search articles..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8"
-              />
-            </div>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Filter by category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                {getUniqueCategories().map((category) => (
-                  <SelectItem key={category} value={category}>
-                    {category}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger>
-                <SelectValue placeholder="Sort by" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="updated_at">Recently Updated</SelectItem>
-                <SelectItem value="title">Title (A-Z)</SelectItem>
-                <SelectItem value="view_count">Most Viewed</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Articles Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {isLoading ? (
-          Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i} className="animate-pulse">
-              <CardContent className="p-4">
-                <div className="space-y-3">
-                  <div className="h-4 bg-muted rounded w-3/4"></div>
-                  <div className="h-3 bg-muted rounded w-full"></div>
-                  <div className="h-3 bg-muted rounded w-2/3"></div>
-                  <div className="flex gap-2">
-                    <div className="h-5 bg-muted rounded w-16"></div>
-                    <div className="h-5 bg-muted rounded w-12"></div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        ) : !articles || articles.length === 0 ? (
-          <div className="col-span-full">
-            <Card>
-              <CardContent className="p-8 text-center">
-                <BookOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No articles found</h3>
-                <p className="text-muted-foreground mb-4">
-                  {searchTerm || categoryFilter !== "all"
-                    ? "Try adjusting your search or filters"
-                    : "Create your first knowledge base article to get started"}
-                </p>
-                {!searchTerm && categoryFilter === "all" && (
-                  <Link to="/knowledge-base/new">
-                    <Button>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Create First Article
-                    </Button>
-                  </Link>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          articles.map((article: any) => (
-            <Link key={article.id} to={`/knowledge-base/${article.id}`}>
-              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
-                <CardContent className="p-4">
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between">
-                      <h3 className="font-semibold line-clamp-2 flex-1">{article.title}</h3>
-                      {article.is_featured && (
-                        <Star className="h-4 w-4 text-yellow-500 flex-shrink-0 ml-2" />
-                      )}
-                    </div>
-
-                    <p className="text-sm text-muted-foreground line-clamp-3">
-                      {article.content.replace(/<[^>]*>/g, '').substring(0, 120)}...
-                    </p>
-
-                    {article.category && (
-                      <Badge variant="outline" className="text-xs">
-                        {article.category}
-                      </Badge>
-                    )}
-
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1">
-                          <Eye className="h-3 w-3" />
-                          {article.view_count || 0}
-                        </div>
-                        {article.rating && renderStars(article.rating)}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {format(new Date(article.updated_at), "MMM d")}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 pt-2 border-t">
-                      <Avatar className="h-6 w-6">
-                        <AvatarFallback className="text-xs">
-                          {article.author_profile?.full_name?.charAt(0) || "U"}
-                        </AvatarFallback>
-                      </Avatar>
-                      <span className="text-xs text-muted-foreground">
-                        {article.author_profile?.full_name || "Unknown"}
-                      </span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))
-        )}
-      </div>
+      <DataPagination meta={meta} page={page} onPageChange={setPage} noun="articles" />
     </div>
   );
 }

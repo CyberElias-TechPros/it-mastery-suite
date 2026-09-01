@@ -1,328 +1,212 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+/**
+ * Typed fetch client for the Cloudflare Workers API.
+ *
+ * Responsibilities:
+ *  - attach the in-memory access token to every call
+ *  - transparently refresh an expired access token once per request
+ *  - normalise the `{ data, meta }` / `{ error }` envelope into values/throws
+ *
+ * The access token is deliberately kept in memory only. The refresh token
+ * lives in an HttpOnly cookie set by the API, so it is never readable by JS.
+ */
 
-class ApiClient {
-  private baseURL: string;
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '');
 
-  constructor(baseURL: string) {
-    this.baseURL = baseURL;
+export interface PageMeta {
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  totalPages?: number;
+  [key: string]: unknown;
+}
+
+export interface ApiEnvelope<T> {
+  data: T;
+  meta?: PageMeta;
+}
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly details?: Record<string, string | string[]>;
+  readonly requestId?: string;
+
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    details?: Record<string, string | string[]>,
+    requestId?: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.details = details;
+    this.requestId = requestId;
   }
 
-  private async request(endpoint: string, options: RequestInit = {}): Promise<any> {
-    const url = `${this.baseURL}${endpoint}`;
-    const token = localStorage.getItem('accessToken');
-
-    const config: RequestInit = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-        ...options.headers,
-      },
-      ...options,
-    };
-
-    try {
-      const response = await fetch(url, config);
-
-      if (response.status === 401) {
-        // Token expired, try to refresh
-        const refreshToken = localStorage.getItem('refreshToken');
-        if (refreshToken) {
-          try {
-            const refreshResponse = await fetch(`${this.baseURL}/auth/refresh`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ refreshToken }),
-            });
-
-            if (refreshResponse.ok) {
-              const data = await refreshResponse.json();
-              localStorage.setItem('accessToken', data.accessToken);
-              localStorage.setItem('refreshToken', data.refreshToken);
-
-              // Retry the original request with new token
-              config.headers = {
-                ...config.headers,
-                Authorization: `Bearer ${data.accessToken}`,
-              };
-              const retryResponse = await fetch(url, config);
-              return this.handleResponse(retryResponse);
-            }
-          } catch (error) {
-            console.error('Token refresh failed:', error);
-          }
-        }
-
-        // If refresh failed, redirect to login
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        window.location.href = '/auth';
-        throw new Error('Authentication required');
-      }
-
-      return this.handleResponse(response);
-    } catch (error) {
-      console.error('API request failed:', error);
-      throw error;
+  /** First field-level message, useful for inline form errors. */
+  get firstFieldError(): string | undefined {
+    if (!this.details) return undefined;
+    // The API reports field errors as `{ field: string[] }`; flatten to the first message.
+    for (const value of Object.values(this.details)) {
+      const message = Array.isArray(value) ? value[0] : value;
+      if (typeof message === 'string' && message) return message;
     }
-  }
-
-  private async handleResponse(response: Response): Promise<any> {
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP ${response.status}`);
-    }
-
-    return response.json();
-  }
-
-  // Authentication methods
-  async login(email: string, password: string) {
-    const response = await fetch(`${this.baseURL}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-
-    const data = await this.handleResponse(response);
-    localStorage.setItem('accessToken', data.accessToken);
-    localStorage.setItem('refreshToken', data.refreshToken);
-    return data;
-  }
-
-  async register(email: string, password: string, fullName: string) {
-    const response = await fetch(`${this.baseURL}/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, fullName }),
-    });
-
-    const data = await this.handleResponse(response);
-    localStorage.setItem('accessToken', data.accessToken);
-    localStorage.setItem('refreshToken', data.refreshToken);
-    return data;
-  }
-
-  async logout() {
-    try {
-      await this.request('/auth/logout', { method: 'POST' });
-    } catch (error) {
-      console.error('Logout API call failed:', error);
-    } finally {
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-    }
-  }
-
-  // User methods
-  async getProfile() {
-    return this.request('/auth/profile');
-  }
-
-  async updateProfile(updates: any) {
-    return this.request('/auth/profile', {
-      method: 'PUT',
-      body: JSON.stringify(updates),
-    });
-  }
-
-  async getUsers(params?: any) {
-    const queryString = params ? new URLSearchParams(params).toString() : '';
-    return this.request(`/users?${queryString}`);
-  }
-
-  async updateUser(id: string, updates: any) {
-    return this.request(`/users/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(updates),
-    });
-  }
-
-  async getUserStats() {
-    return this.request('/users/stats/overview');
-  }
-
-  // Ticket methods
-  async getTickets(params?: any) {
-    const queryString = params ? new URLSearchParams(params).toString() : '';
-    return this.request(`/tickets?${queryString}`);
-  }
-
-  async getTicket(id: string) {
-    return this.request(`/tickets/${id}`);
-  }
-
-  async createTicket(ticket: any) {
-    return this.request('/tickets', {
-      method: 'POST',
-      body: JSON.stringify(ticket),
-    });
-  }
-
-  async updateTicket(id: string, updates: any) {
-    return this.request(`/tickets/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(updates),
-    });
-  }
-
-  async addTicketComment(ticketId: string, comment: string, isInternal = false) {
-    return this.request(`/tickets/${ticketId}/comments`, {
-      method: 'POST',
-      body: JSON.stringify({ comment, isInternal }),
-    });
-  }
-
-  async uploadTicketAttachment(ticketId: string, file: File) {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    return this.request(`/tickets/${ticketId}/attachments`, {
-      method: 'POST',
-      headers: {}, // Let browser set content-type for FormData
-      body: formData,
-    });
-  }
-
-  async getTicketStats() {
-    return this.request('/tickets/stats/overview');
-  }
-
-  // Asset methods
-  async getAssets(params?: any) {
-    const queryString = params ? new URLSearchParams(params).toString() : '';
-    return this.request(`/assets?${queryString}`);
-  }
-
-  async createAsset(asset: any) {
-    return this.request('/assets', {
-      method: 'POST',
-      body: JSON.stringify(asset),
-    });
-  }
-
-  async updateAsset(id: string, updates: any) {
-    return this.request(`/assets/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(updates),
-    });
-  }
-
-  async getAssetStats() {
-    return this.request('/assets/stats/overview');
-  }
-
-  // Expense methods
-  async getExpenses(params?: any) {
-    const queryString = params ? new URLSearchParams(params).toString() : '';
-    return this.request(`/expenses?${queryString}`);
-  }
-
-  async createExpense(expense: any) {
-    return this.request('/expenses', {
-      method: 'POST',
-      body: JSON.stringify(expense),
-    });
-  }
-
-  async getExpenseStats() {
-    return this.request('/expenses/stats/overview');
-  }
-
-  // Diesel methods
-  async getDieselLogs() {
-    return this.request('/diesel');
-  }
-
-  async createDieselLog(log: any) {
-    return this.request('/diesel', {
-      method: 'POST',
-      body: JSON.stringify(log),
-    });
-  }
-
-  // Vendor methods
-  async getVendors() {
-    return this.request('/vendors');
-  }
-
-  async createVendor(vendor: any) {
-    return this.request('/vendors', {
-      method: 'POST',
-      body: JSON.stringify(vendor),
-    });
-  }
-
-  // Calendar methods
-  async getCalendarEvents(params?: any) {
-    const queryString = params ? new URLSearchParams(params).toString() : '';
-    return this.request(`/calendar?${queryString}`);
-  }
-
-  async createCalendarEvent(event: any) {
-    return this.request('/calendar', {
-      method: 'POST',
-      body: JSON.stringify(event),
-    });
-  }
-
-  // Knowledge Base methods
-  async getKBArticles(params?: any) {
-    const queryString = params ? new URLSearchParams(params).toString() : '';
-    return this.request(`/knowledge-base?${queryString}`);
-  }
-
-  async createKBArticle(article: any) {
-    return this.request('/knowledge-base', {
-      method: 'POST',
-      body: JSON.stringify(article),
-    });
-  }
-
-  // Report methods
-  async getReports() {
-    return this.request('/reports');
-  }
-
-  async createReport(report: any) {
-    return this.request('/reports', {
-      method: 'POST',
-      body: JSON.stringify(report),
-    });
-  }
-
-  // Automation methods
-  async getAutomationRules() {
-    return this.request('/automation');
-  }
-
-  async createAutomationRule(rule: any) {
-    return this.request('/automation', {
-      method: 'POST',
-      body: JSON.stringify(rule),
-    });
-  }
-
-  // Notification methods
-  async getNotifications(params?: any) {
-    const queryString = params ? new URLSearchParams(params).toString() : '';
-    return this.request(`/notifications?${queryString}`);
-  }
-
-  async markNotificationRead(id: string) {
-    return this.request(`/notifications/${id}/read`, {
-      method: 'PUT',
-    });
-  }
-
-  // System methods
-  async getSystemHealth() {
-    return this.request('/system/health');
-  }
-
-  async getSystemStats() {
-    return this.request('/system/stats');
+    return undefined;
   }
 }
 
-export const apiClient = new ApiClient(API_BASE_URL);
-export default apiClient;
+type Listener = (token: string | null) => void;
+
+let accessToken: string | null = null;
+let refreshPromise: Promise<string | null> | null = null;
+const listeners = new Set<Listener>();
+
+export function getAccessToken() {
+  return accessToken;
+}
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+  listeners.forEach((listener) => listener(token));
+}
+
+/** Notifies subscribers (the auth context) when the session is dropped. */
+export function onAuthChange(listener: Listener) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+async function parseResponse<T>(response: Response): Promise<ApiEnvelope<T>> {
+  const text = await response.text();
+  let payload: unknown = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const error = (payload as { error?: { code?: string; message?: string; details?: Record<string, string>; requestId?: string } })
+      ?.error;
+    throw new ApiError(
+      response.status,
+      error?.code ?? 'HTTP_ERROR',
+      error?.message ?? `Request failed with status ${response.status}`,
+      error?.details,
+      error?.requestId ?? response.headers.get('x-request-id') ?? undefined,
+    );
+  }
+
+  return (payload ?? { data: null }) as ApiEnvelope<T>;
+}
+
+/** Exchanges the refresh cookie for a new access token. Deduplicated. */
+export async function refreshAccessToken(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: '{}',
+        });
+        if (!response.ok) {
+          setAccessToken(null);
+          return null;
+        }
+        const body = (await response.json()) as ApiEnvelope<{ accessToken: string }>;
+        setAccessToken(body.data.accessToken);
+        return body.data.accessToken;
+      } catch {
+        setAccessToken(null);
+        return null;
+      } finally {
+        // Allow the next caller to start a fresh refresh.
+        setTimeout(() => {
+          refreshPromise = null;
+        }, 0);
+      }
+    })();
+  }
+  return refreshPromise;
+}
+
+export interface RequestOptions extends Omit<RequestInit, 'body'> {
+  /** JSON body; serialised automatically. */
+  json?: unknown;
+  /** Raw body (FormData, Blob…) used as-is. */
+  body?: BodyInit | null;
+  /** Query string parameters; undefined/null/'' entries are dropped. */
+  query?: Record<string, string | number | boolean | undefined | null>;
+  /** Skip the automatic refresh-and-retry (used by auth endpoints). */
+  skipRefresh?: boolean;
+}
+
+function buildUrl(path: string, query?: RequestOptions['query']) {
+  const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  if (!query) return url;
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') continue;
+    params.set(key, String(value));
+  }
+  const qs = params.toString();
+  return qs ? `${url}?${qs}` : url;
+}
+
+export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<ApiEnvelope<T>> {
+  const { json, query, skipRefresh, headers, ...rest } = options;
+  const requestHeaders = new Headers(headers);
+  let body = options.body ?? undefined;
+
+  if (json !== undefined) {
+    requestHeaders.set('content-type', 'application/json');
+    body = JSON.stringify(json);
+  }
+  if (accessToken) requestHeaders.set('authorization', `Bearer ${accessToken}`);
+
+  const url = buildUrl(path, query);
+  const send = () => fetch(url, { ...rest, headers: requestHeaders, body, credentials: 'include' });
+
+  let response = await send();
+
+  if (response.status === 401 && !skipRefresh) {
+    const token = await refreshAccessToken();
+    if (token) {
+      requestHeaders.set('authorization', `Bearer ${token}`);
+      response = await send();
+    }
+  }
+
+  return parseResponse<T>(response);
+}
+
+/** Convenience helpers returning just the payload. */
+export const api = {
+  get: async <T>(path: string, query?: RequestOptions['query'], options?: RequestOptions) =>
+    (await apiFetch<T>(path, { ...options, method: 'GET', query })).data,
+  getPage: <T>(path: string, query?: RequestOptions['query'], options?: RequestOptions) =>
+    apiFetch<T>(path, { ...options, method: 'GET', query }),
+  post: async <T>(path: string, json?: unknown, options?: RequestOptions) =>
+    (await apiFetch<T>(path, { ...options, method: 'POST', json })).data,
+  put: async <T>(path: string, json?: unknown, options?: RequestOptions) =>
+    (await apiFetch<T>(path, { ...options, method: 'PUT', json })).data,
+  del: async <T>(path: string, query?: RequestOptions['query'], options?: RequestOptions) =>
+    (await apiFetch<T>(path, { ...options, method: 'DELETE', query })).data,
+  upload: async <T>(path: string, form: FormData) => (await apiFetch<T>(path, { method: 'POST', body: form })).data,
+};
+
+/** Turns any thrown value into a user-facing message. */
+export function errorMessage(error: unknown, fallback = 'Something went wrong. Please try again.'): string {
+  if (error instanceof ApiError) return error.firstFieldError ?? error.message;
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}

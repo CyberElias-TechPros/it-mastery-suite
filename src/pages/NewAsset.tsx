@@ -1,259 +1,288 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Save, Package } from "lucide-react";
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, Package, Save } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useToast } from '@/hooks/use-toast';
+import { api, errorMessage } from '@/lib/api';
+
+interface Option {
+  id: string;
+  name: string;
+}
+
+interface AssignableUser {
+  id: string;
+  full_name: string | null;
+}
+
+const NONE = 'none';
+
+const CATEGORIES = ['laptop', 'desktop', 'server', 'printer', 'network', 'mobile', 'other'];
 
 export default function NewAsset() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { profile } = useAuth();
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+
   const [formData, setFormData] = useState({
-    name: "",
-    type: "",
-    model: "",
-    serial_number: "",
-    purchase_date: "",
-    purchase_price: "",
-    warranty_expiry: "",
-    location: "",
-    notes: "",
+    assetTag: '',
+    name: '',
+    category: 'laptop',
+    model: '',
+    serialNumber: '',
+    status: 'active',
+    purchaseDate: '',
+    purchaseCost: '',
+    warrantyExpiry: '',
+    location: '',
+    departmentId: NONE,
+    branchId: NONE,
+    assignedTo: NONE,
+    description: '',
+    notes: '',
   });
 
-  const { data: departments } = useQuery({
-    queryKey: ["departments"],
-    queryFn: async () => {
-      const { data } = await supabase.from("departments").select("*");
-      return data || [];
-    },
+  const { data: departments = [] } = useQuery({
+    queryKey: ['departments-lookup'],
+    queryFn: () => api.get<Option[]>('/departments'),
+  });
+  const { data: branches = [] } = useQuery({ queryKey: ['branches-lookup'], queryFn: () => api.get<Option[]>('/branches') });
+  const { data: people = [] } = useQuery({
+    queryKey: ['assignable-users'],
+    queryFn: () => api.get<AssignableUser[]>('/users/assignable'),
   });
 
-  const { data: branches } = useQuery({
-    queryKey: ["branches"],
-    queryFn: async () => {
-      const { data } = await supabase.from("branches").select("*");
-      return data || [];
-    },
-  });
-
-  const createAssetMutation = useMutation({
-    mutationFn: async (data: any) => {
-      // Generate asset tag
-      const { data: existingAssets } = await supabase
-        .from("assets")
-        .select("asset_tag")
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      const nextNumber = existingAssets && existingAssets.length > 0
-        ? parseInt(existingAssets[0].asset_tag.split('-')[1]) + 1
-        : 1;
-
-      const assetTag = `AST-${nextNumber.toString().padStart(4, '0')}`;
-
-      const { data: asset, error } = await supabase
-        .from("assets")
-        .insert({
-          ...data,
-          asset_tag: assetTag,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      return asset;
-    },
+  const mutation = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => api.post('/assets', payload),
     onSuccess: () => {
-      toast({
-        title: "Success",
-        description: "Asset created successfully",
-      });
-      navigate("/assets");
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['asset-stats'] });
+      toast({ title: 'Asset registered' });
+      navigate('/assets');
     },
-    onError: (error) => {
-      toast({
-        title: "Error",
-        description: "Failed to create asset",
-        variant: "destructive",
-      });
-      console.error("Error creating asset:", error);
-    },
+    onError: (error) => toast({ title: 'Could not save the asset', description: errorMessage(error), variant: 'destructive' }),
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+  const setField = (field: keyof typeof formData) => (value: string) => setFormData((prev) => ({ ...prev, [field]: value }));
 
-    try {
-      await createAssetMutation.mutateAsync(formData);
-    } finally {
-      setLoading(false);
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (formData.warrantyExpiry && formData.purchaseDate && formData.warrantyExpiry < formData.purchaseDate) {
+      toast({
+        title: 'Check the dates',
+        description: 'Warranty expiry cannot be before the purchase date.',
+        variant: 'destructive',
+      });
+      return;
     }
-  };
-
-  const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    mutation.mutate({
+      assetTag: formData.assetTag.trim(),
+      name: formData.name.trim(),
+      category: formData.category,
+      model: formData.model || undefined,
+      serialNumber: formData.serialNumber || undefined,
+      status: formData.status,
+      purchaseDate: formData.purchaseDate || undefined,
+      purchaseCost: formData.purchaseCost ? Number(formData.purchaseCost) : undefined,
+      warrantyExpiry: formData.warrantyExpiry || undefined,
+      location: formData.location || undefined,
+      departmentId: formData.departmentId === NONE ? undefined : formData.departmentId,
+      branchId: formData.branchId === NONE ? undefined : formData.branchId,
+      assignedTo: formData.assignedTo === NONE ? undefined : formData.assignedTo,
+      description: formData.description || undefined,
+      notes: formData.notes || undefined,
+    });
   };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/assets")}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Assets
+        <Button asChild variant="ghost" size="sm">
+          <Link to="/assets">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to assets
+          </Link>
         </Button>
         <div>
-          <h1 className="text-3xl font-bold">Add New Asset</h1>
-          <p className="text-muted-foreground">Register a new IT asset</p>
+          <h1 className="text-3xl font-bold">New asset</h1>
+          <p className="text-muted-foreground">Add equipment to the register</p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit}>
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Package className="h-5 w-5" />
-                Asset Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Asset Name *</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => handleInputChange("name", e.target.value)}
-                  placeholder="e.g., Dell Latitude 5420"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="type">Asset Type *</Label>
-                <Select value={formData.type} onValueChange={(value) => handleInputChange("type", value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select asset type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="laptop">Laptop</SelectItem>
-                    <SelectItem value="desktop">Desktop</SelectItem>
-                    <SelectItem value="server">Server</SelectItem>
-                    <SelectItem value="printer">Printer</SelectItem>
-                    <SelectItem value="mobile_device">Mobile Device</SelectItem>
-                    <SelectItem value="software_license">Software License</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="model">Model</Label>
-                <Input
-                  id="model"
-                  value={formData.model}
-                  onChange={(e) => handleInputChange("model", e.target.value)}
-                  placeholder="e.g., Latitude 5420"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="serial_number">Serial Number</Label>
-                <Input
-                  id="serial_number"
-                  value={formData.serial_number}
-                  onChange={(e) => handleInputChange("serial_number", e.target.value)}
-                  placeholder="Enter serial number"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="location">Location</Label>
-                <Input
-                  id="location"
-                  value={formData.location}
-                  onChange={(e) => handleInputChange("location", e.target.value)}
-                  placeholder="e.g., Office 201, Building A"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  value={formData.notes}
-                  onChange={(e) => handleInputChange("notes", e.target.value)}
-                  placeholder="Additional notes about the asset"
-                  rows={3}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Purchase & Warranty</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="purchase_date">Purchase Date</Label>
-                <Input
-                  id="purchase_date"
-                  type="date"
-                  value={formData.purchase_date}
-                  onChange={(e) => handleInputChange("purchase_date", e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="purchase_price">Purchase Price</Label>
-                <Input
-                  id="purchase_price"
-                  type="number"
-                  step="0.01"
-                  value={formData.purchase_price}
-                  onChange={(e) => handleInputChange("purchase_price", e.target.value)}
-                  placeholder="0.00"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="warranty_expiry">Warranty Expiry</Label>
-                <Input
-                  id="warranty_expiry"
-                  type="date"
-                  value={formData.warranty_expiry}
-                  onChange={(e) => handleInputChange("warranty_expiry", e.target.value)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="flex justify-end gap-4 mt-6">
-          <Button type="button" variant="outline" onClick={() => navigate("/assets")}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={loading}>
-            <Save className="mr-2 h-4 w-4" />
-            {loading ? "Creating..." : "Create Asset"}
-          </Button>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Asset details
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="assetTag">Asset tag *</Label>
+              <Input
+                id="assetTag"
+                placeholder="AST-0001"
+                value={formData.assetTag}
+                onChange={(event) => setField('assetTag')(event.target.value)}
+                pattern="[A-Za-z0-9._\-]+"
+                title="Letters, numbers, dots, underscores and dashes only"
+                required
+              />
+              <p className="text-xs text-muted-foreground">Must be unique across the register.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="name">Name *</Label>
+              <Input id="name" value={formData.name} onChange={(event) => setField('name')(event.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="category">Category</Label>
+              <Select value={formData.category} onValueChange={setField('category')}>
+                <SelectTrigger id="category">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map((category) => (
+                    <SelectItem key={category} value={category} className="capitalize">
+                      {category}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="status">Status</Label>
+              <Select value={formData.status} onValueChange={setField('status')}>
+                <SelectTrigger id="status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="maintenance">Maintenance</SelectItem>
+                  <SelectItem value="retired">Retired</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="model">Model</Label>
+              <Input id="model" value={formData.model} onChange={(event) => setField('model')(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="serial">Serial number</Label>
+              <Input id="serial" value={formData.serialNumber} onChange={(event) => setField('serialNumber')(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="purchaseDate">Purchase date</Label>
+              <Input
+                id="purchaseDate"
+                type="date"
+                value={formData.purchaseDate}
+                onChange={(event) => setField('purchaseDate')(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="purchaseCost">Purchase cost</Label>
+              <Input
+                id="purchaseCost"
+                type="number"
+                min="0"
+                step="0.01"
+                value={formData.purchaseCost}
+                onChange={(event) => setField('purchaseCost')(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="warranty">Warranty expiry</Label>
+              <Input
+                id="warranty"
+                type="date"
+                value={formData.warrantyExpiry}
+                onChange={(event) => setField('warrantyExpiry')(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="location">Location</Label>
+              <Input id="location" value={formData.location} onChange={(event) => setField('location')(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="branch">Branch</Label>
+              <Select value={formData.branchId} onValueChange={setField('branchId')}>
+                <SelectTrigger id="branch">
+                  <SelectValue placeholder="Select a branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Not specified</SelectItem>
+                  {branches.map((branch) => (
+                    <SelectItem key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="department">Department</Label>
+              <Select value={formData.departmentId} onValueChange={setField('departmentId')}>
+                <SelectTrigger id="department">
+                  <SelectValue placeholder="Select a department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Not specified</SelectItem>
+                  {departments.map((department) => (
+                    <SelectItem key={department.id} value={department.id}>
+                      {department.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="assignedTo">Assigned to</Label>
+              <Select value={formData.assignedTo} onValueChange={setField('assignedTo')}>
+                <SelectTrigger id="assignedTo">
+                  <SelectValue placeholder="Unassigned" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Unassigned</SelectItem>
+                  {people.map((person) => (
+                    <SelectItem key={person.id} value={person.id}>
+                      {person.full_name ?? 'Unnamed'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                rows={3}
+                value={formData.description}
+                onChange={(event) => setField('description')(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea id="notes" rows={3} value={formData.notes} onChange={(event) => setField('notes')(event.target.value)} />
+            </div>
+            <div className="flex gap-3 md:col-span-2">
+              <Button type="submit" disabled={mutation.isPending}>
+                <Save className="mr-2 h-4 w-4" />
+                {mutation.isPending ? 'Saving…' : 'Save asset'}
+              </Button>
+              <Button asChild type="button" variant="outline">
+                <Link to="/assets">Cancel</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </form>
     </div>
   );

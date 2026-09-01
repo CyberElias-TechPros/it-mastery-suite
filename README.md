@@ -1,351 +1,199 @@
-# TechPros IT Service Management System
+# TechPros ITSM
 
-A comprehensive, full-featured IT Service Management (ITSM) platform built with React, Node.js, Express, and PostgreSQL.
+IT Service Management for TechPros: ticketing with SLAs, asset and diesel tracking, procurement,
+expenses and budgets, a knowledge base, a shared calendar, reporting, automation rules and system
+health monitoring.
 
-## 🎯 Overview
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 18 + Vite + TypeScript + Tailwind/shadcn, deployed on **Vercel** |
+| API | Hono on **Cloudflare Workers** (edge) |
+| Relational data | **Cloudflare D1** (SQLite) |
+| Files | **Cloudflare R2** (private bucket, streamed through the API) |
+| Cache, rate limits, throttles | **Cloudflare KV** |
+| Scheduled work | **Cloudflare Cron Triggers** (SLA sweep, reminders, metrics, retention) |
 
-TechPros ITSM is a complete enterprise-grade solution that includes:
+There is no other backend: no Supabase, no Express server, no external database.
 
-- **16 Major Modules**: Tickets, Assets, Expenses, Diesel Tracking, Calendar, Vendors, Knowledge Base, Reports, Automation, Notifications, and more
-- **Role-Based Access Control**: Admin, Technician, and Employee roles
-- **Modern Tech Stack**: React 18, Node.js, Express, PostgreSQL
-- **Production Ready**: Security, scalability, and comprehensive API
+---
 
-## 📋 Features
+## Repository layout
 
-### ✅ Core Modules Implemented
+```
+.
+├── src/                  # React application (Vite)
+│   ├── lib/api.ts        # typed API client: envelopes, auth, refresh-retry
+│   ├── contexts/         # AuthContext (access token in memory, refresh in cookie)
+│   ├── components/       # Layout, shared widgets, shadcn/ui primitives
+│   ├── pages/            # one screen per route
+│   └── test/             # vitest + testing-library suites
+├── worker/               # Cloudflare Workers API
+│   ├── src/routes/       # auth, tickets, assets, org, diesel, procurement, finance,
+│   │                     # kb, calendar, notifications, reports, automation, system,
+│   │                     # attachments, dashboard
+│   ├── src/middleware/   # request-id, cors, error, auth, rate-limit
+│   ├── src/lib/          # crypto, jwt, validation, db, audit, notifications, email
+│   ├── migrations/       # D1 schema migrations (applied with wrangler)
+│   ├── seeds/demo.sql    # optional local reference data (no accounts)
+│   └── test/             # vitest-pool-workers integration tests (real D1)
+├── vercel.json           # Vercel build, SPA rewrites, security headers
+└── ci/                   # CI pipeline (move to .github/workflows/ to enable)
+```
 
-#### 🎫 **Ticketing System**
-- Complete ticket lifecycle management
-- Priority levels and SLA tracking
-- File attachments and comments
-- Advanced filtering and search
-- Auto-assignment and escalation
+---
 
-#### 💻 **Asset Management**
-- Comprehensive IT asset inventory
-- 11 asset types (laptops, servers, routers, etc.)
-- Maintenance scheduling and tracking
-- Warranty and lifecycle management
-- QR code generation and transfers
+## Local development
 
-#### ⛽ **Diesel Consumption Tracking**
-- Generator runtime monitoring
-- Fuel consumption analytics
-- Cost tracking and efficiency metrics
-- Automated alerts for low fuel
-- Historical reporting and trends
-
-#### 📅 **Calendar & Scheduling**
-- IT maintenance scheduling
-- Event management with attendees
-- Recurring events support
-- Calendar integration
-- Automated reminders
-
-#### 🏢 **Vendor & Contract Management**
-- Supplier database with ratings
-- Contract expiry tracking
-- Purchase order management
-- Vendor performance monitoring
-- Automated renewal alerts
-
-#### 📚 **Knowledge Base**
-- Rich text articles with categories
-- Search and tagging system
-- User ratings and feedback
-- Featured articles
-- Version control and history
-
-#### 💰 **Financial Management**
-- Expense tracking and approval
-- Budget management by department
-- Cost center analytics
-- Receipt upload and storage
-- Multi-currency support
-
-#### 🏛️ **Facilities Management**
-- Multi-branch support
-- Department organization
-- Location-based analytics
-- Manager assignments
-- Hierarchical structure
-
-#### 👥 **User Management**
-- Role-based permissions
-- Profile management
-- User activity tracking
-- Bulk operations
-- Authentication & authorization
-
-#### 📊 **Custom Report Builder**
-- Drag-and-drop field selection
-- Advanced filtering options
-- Multiple export formats (PDF, CSV, Excel)
-- Saved report templates
-- Scheduled report generation
-
-#### 🔧 **System Health Monitoring**
-- Server performance metrics
-- Database health checks
-- API response monitoring
-- Automated alerting
-- Historical trending
-
-#### ⚡ **Automation Rules Engine**
-- IF-THEN workflow automation
-- Multiple trigger events
-- Complex condition matching
-- Action execution logging
-- Rule activation/deactivation
-
-#### 🔔 **Advanced Notifications**
-- In-app notification center
-- Email and SMS integration
-- Notification preferences
-- Bulk operations
-- Actionable notifications
-
-#### 🔒 **Security & Audit**
-- JWT authentication
-- Activity logging
-- IP address tracking
-- Role-based access control
-- Data encryption
-
-## 🏗️ Architecture
-
-### Frontend (React)
-- **Framework**: React 18 with Vite
-- **UI Library**: Shadcn/ui + Radix UI
-- **State Management**: TanStack Query + Context API
-- **Styling**: Tailwind CSS
-- **Routing**: React Router
-- **Forms**: React Hook Form + Zod validation
-
-### Backend (Node.js/Express)
-- **Runtime**: Node.js 16+
-- **Framework**: Express.js
-- **Database**: PostgreSQL with connection pooling
-- **Authentication**: JWT with refresh tokens
-- **Validation**: Express Validator
-- **File Upload**: Multer
-- **Email**: Nodemailer
-- **Security**: Helmet, CORS, Rate Limiting
-
-### Database (PostgreSQL)
-- **20+ Tables** with proper relationships
-- **Row Level Security** (RLS) policies
-- **Indexes** for performance optimization
-- **Triggers** for automated updates
-- **Views** for complex queries
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Node.js 16+
-- PostgreSQL database
-- Git
-
-### 1. Clone and Setup
+Prerequisites: Node 20+, a Cloudflare account (only needed for deployment).
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd techpros-itsm
-
-# Install frontend dependencies
+# 1. install
 npm install
+npm --prefix worker install
 
-# Setup backend
-cd server
-npm install
-cd ..
+# 2. worker secrets for local dev
+cp worker/.dev.vars.example worker/.dev.vars      # then edit JWT_SECRET (>= 32 chars)
+
+# 3. create the local D1 database
+npm --prefix worker run db:migrate:local
+npm --prefix worker run db:seed:local             # optional reference data
+
+# 4. run both processes (two terminals)
+npm --prefix worker run dev                       # http://127.0.0.1:8787
+npm run dev                                       # http://localhost:8080
 ```
 
-### 2. Database Setup
+The Vite dev server proxies `/api/*` to `127.0.0.1:8787`, so the browser only makes same-origin
+requests — cookies and CORS behave exactly as they do in production.
 
-**Option A: Manual SQL (Recommended)**
-1. Create a PostgreSQL database
-2. Copy the SQL from `apply_migration.sql`
-3. Run it in your PostgreSQL client or pgAdmin
+**First account:** with `BOOTSTRAP_ADMIN = "true"` (default in the dev environment only), the first
+account registered becomes the administrator. Set it to `"false"` immediately after bootstrapping a
+deployed environment.
 
-**Option B: Supabase (if you have CLI access)**
+### Useful commands
+
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Vite dev server on :8080 with the `/api` proxy |
+| `npm run typecheck` / `npm test` / `npm run build` | Frontend checks |
+| `npm --prefix worker run dev` | `wrangler dev` with local D1/KV/R2 simulation |
+| `npm --prefix worker run typecheck` / `test` | Worker checks (tests run against a real D1) |
+| `npm --prefix worker run db:migrate:local\|db:migrate:remote` | Apply migrations |
+
+---
+
+## Environment variables
+
+### Frontend (Vercel project settings → Environment Variables)
+
+| Name | Required | Example | Notes |
+| --- | --- | --- | --- |
+| `VITE_API_BASE_URL` | production/preview | `https://api.techpros.example/api` | Absolute URL of the Workers API. Leave empty locally so the Vite proxy is used. |
+
+`VITE_*` variables are compiled into the browser bundle — never put secrets there.
+
+### Worker vars (`worker/wrangler.toml`, per environment — not secret)
+
+| Name | Example | Notes |
+| --- | --- | --- |
+| `ENVIRONMENT` | `production` | Reported by `/api/system/ping`, used in logs |
+| `ALLOWED_ORIGINS` | `https://app.techpros.example,https://*.vercel.app` | Comma separated. `https://*.vercel.app` permits preview deployments. Unknown origins get a 403 on preflight. |
+| `ACCESS_TOKEN_TTL_SECONDS` | `900` | Access-token lifetime |
+| `REFRESH_TOKEN_TTL_SECONDS` | `1209600` | Refresh-cookie lifetime |
+| `MAX_UPLOAD_BYTES` | `10485760` | Hard upload cap (also enforced per request) |
+| `BOOTSTRAP_ADMIN` | `false` | `true` only while creating the very first admin |
+
+### Worker secrets (`wrangler secret put NAME --env <env>` — never committed)
+
+| Name | Required | Notes |
+| --- | --- | --- |
+| `JWT_SECRET` | yes | ≥ 32 characters. The worker refuses to start without it. |
+| `RESEND_API_KEY` | no | Transactional email. If unset, emails are logged instead of sent. |
+| `EMAIL_FROM` | no | e.g. `TechPros ITSM <itsm@example.com>` |
+| `APP_BASE_URL` | recommended | Used to build password-reset links |
+
+Locally these live in `worker/.dev.vars`, which is gitignored.
+
+---
+
+## Deployment
+
+### 1. Cloudflare (API, database, storage)
+
 ```bash
-cd supabase
-npx supabase db push
+cd worker
+npx wrangler login
+
+# Resources — run once per environment (production shown; repeat with -preview names)
+npx wrangler d1 create itsm-db
+npx wrangler kv namespace create CACHE
+npx wrangler kv namespace create RATE_LIMIT
+npx wrangler r2 bucket create itsm-uploads
 ```
 
-### 3. Environment Configuration
-
-**Frontend (.env):**
-```env
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-```
-
-**Backend (server/.env):**
-```env
-PORT=3001
-NODE_ENV=development
-DATABASE_URL=postgresql://user:pass@localhost:5432/techpros_itsm
-JWT_SECRET=your_super_secret_jwt_key
-FRONTEND_URL=http://localhost:5173
-```
-
-### 4. Start the Application
+Copy each returned id into `worker/wrangler.toml` (`database_id`, KV `id`s) for the matching
+environment block: the top-level block is development, `[env.preview]` and `[env.production]` hold
+the deployed ones. Set `ALLOWED_ORIGINS` in each block to the exact frontend origin.
 
 ```bash
-# Terminal 1: Start Backend API
-cd server
-npm run dev
+# Secrets
+npx wrangler secret put JWT_SECRET --env production          # >= 32 random characters
+npx wrangler secret put RESEND_API_KEY --env production      # optional
+npx wrangler secret put EMAIL_FROM --env production          # optional
+npx wrangler secret put APP_BASE_URL --env production
 
-# Terminal 2: Start Frontend
-npm run dev
+# Schema, then deploy
+npx wrangler d1 migrations apply itsm-db --remote --env production
+npx wrangler deploy --env production
 ```
 
-### 5. Access the Application
+Verify: `curl https://<worker-url>/api/system/ping` → `{"data":{"status":"ok",...}}`.
 
-- **Frontend**: http://localhost:5173
-- **API**: http://localhost:3001
-- **API Health Check**: http://localhost:3001/api/health
+Cron triggers (`*/15 * * * *` and `0 6 * * *`) are created by `wrangler deploy`; they run the SLA
+sweep, event reminders, metric recording, expiry notices and retention cleanup.
 
-## 📖 API Documentation
+To serve the API from your own domain, add a route in the Cloudflare dashboard
+(`api.techpros.example/*` → the worker) and use that host in `VITE_API_BASE_URL`.
 
-The backend provides a comprehensive REST API with endpoints for all modules:
+### 2. Vercel (frontend)
 
-- `POST /api/auth/login` - User authentication
-- `GET /api/tickets` - List tickets with filtering
-- `POST /api/tickets` - Create new ticket
-- `GET /api/assets` - Asset inventory
-- `GET /api/expenses` - Financial reports
-- `GET /api/calendar` - Scheduled events
-- `GET /api/knowledge-base` - KB articles
-- And many more...
+1. Import the repository. Vercel reads `vercel.json`: framework `vite`, build `npm run build`,
+   output `dist`, SPA rewrites and security headers are already configured.
+2. Set `VITE_API_BASE_URL` for **Production** (production worker URL + `/api`) and for
+   **Preview** (preview worker URL + `/api`).
+3. Deploy, then add the resulting origin(s) to the worker's `ALLOWED_ORIGINS` and redeploy the
+   worker so CORS accepts them.
 
-See `server/README.md` for complete API documentation.
+### 3. Post-deploy checklist
 
-## 🔐 Default Users
+- [ ] Register the first account, confirm it is `admin`, then set `BOOTSTRAP_ADMIN = "false"` and
+      redeploy the worker.
+- [ ] `GET /api/system/health` (as admin) reports `healthy` for D1, KV and R2.
+- [ ] Sign-in, refresh and sign-out work from the deployed frontend (cookie + CORS).
+- [ ] Upload and download an attachment (R2 wiring).
+- [ ] Rotate `JWT_SECRET` on any suspicion of exposure — it invalidates all access tokens.
 
-After database setup, create your first admin user:
+---
 
-```sql
-INSERT INTO profiles (email, full_name, role) VALUES ('admin@techpros.com', 'System Admin', 'admin');
+## Security model
+
+- Argon2-style PBKDF2 password hashing with per-user salts; passwords ≥ 10 chars with letters+digits.
+- Short-lived access tokens (JWT, in memory only) + rotating refresh tokens in an `HttpOnly`,
+  `Secure`, `SameSite` cookie scoped to `/api/auth`. Reuse of a rotated token revokes the family.
+- Every route authorises server-side: employees only see their own tickets/expenses, staff-only
+  datasets are filtered in SQL, admin-only mutations are enforced in the handler (never in the UI).
+- KV-backed rate limits: login 20/15 min per IP and 10/15 min per account, register 5/h, refresh
+  120/15 min, plus a global 600/60 s ceiling on `/api/*`.
+- Strict CORS allow-list with credentials; unknown-origin preflights are rejected with 403.
+- All input validated with zod; SQL is fully parameterised and report fields resolve through a
+  whitelist, so no user string ever reaches SQL. CSV exports escape formula-injection prefixes.
+- Uploads: MIME whitelist, size cap, private R2 bucket, downloads streamed through an authorised
+  endpoint (objects are never public).
+- Audit trail in `activity_logs` for every mutation, with request ids echoed as `x-request-id`.
+
+## Testing
+
+```bash
+npm test                    # frontend unit/component tests (vitest + testing-library)
+npm --prefix worker test    # API integration tests against a real D1 instance
 ```
-
-## 🎨 UI Screenshots
-
-The application includes:
-
-- **Dashboard**: Real-time metrics and widgets
-- **Ticket Management**: Full helpdesk interface
-- **Asset Inventory**: Comprehensive asset tracking
-- **Financial Reports**: Expense analysis and budgeting
-- **Calendar**: Event scheduling and management
-- **Knowledge Base**: Internal documentation
-- **User Management**: Role-based administration
-- **Report Builder**: Custom analytics creation
-- **System Health**: Performance monitoring
-- **Automation Rules**: Workflow configuration
-
-## 🛠️ Development
-
-### Project Structure
-```
-techpros-itsm/
-├── src/                    # React Frontend
-│   ├── components/         # Reusable UI components
-│   ├── pages/             # Page components
-│   ├── contexts/          # React contexts
-│   ├── hooks/             # Custom hooks
-│   └── integrations/      # External service integrations
-├── server/                # Node.js Backend
-│   ├── routes/            # API route handlers
-│   ├── middleware/        # Express middleware
-│   ├── config/            # Configuration files
-│   └── uploads/           # File storage
-├── supabase/              # Database migrations
-└── apply_migration.sql    # Manual database setup
-```
-
-### Key Technologies
-
-**Frontend:**
-- React 18 with Hooks
-- TypeScript for type safety
-- Vite for fast development
-- Tailwind CSS for styling
-- React Query for data fetching
-- React Router for navigation
-
-**Backend:**
-- Express.js framework
-- PostgreSQL database
-- JWT authentication
-- Multer for file uploads
-- Nodemailer for emails
-- Helmet for security
-
-## 🚀 Deployment
-
-### Production Checklist
-
-- [ ] Set `NODE_ENV=production`
-- [ ] Configure production database
-- [ ] Set strong JWT secrets
-- [ ] Configure SMTP for emails
-- [ ] Set up file storage (AWS S3, etc.)
-- [ ] Configure reverse proxy (nginx)
-- [ ] Set up SSL certificates
-- [ ] Configure monitoring and logging
-- [ ] Set up backup procedures
-
-### Docker Deployment
-
-```dockerfile
-# Backend Dockerfile
-FROM node:16-alpine
-WORKDIR /app
-COPY server/package*.json ./
-RUN npm ci --only=production
-COPY server/ .
-EXPOSE 3001
-CMD ["npm", "start"]
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 📞 Support
-
-For support and questions:
-- Check the API documentation in `server/README.md`
-- Review the database schema in `apply_migration.sql`
-- Check the frontend component documentation
-
-## 🎉 What's Included
-
-This is a **production-ready, enterprise-grade ITSM solution** that includes:
-
-- ✅ **16 Complete Modules** with full CRUD operations
-- ✅ **Role-Based Security** with audit logging
-- ✅ **Modern UI/UX** with responsive design
-- ✅ **Comprehensive API** with 50+ endpoints
-- ✅ **Database Schema** with 20+ optimized tables
-- ✅ **File Management** with upload/download
-- ✅ **Email Notifications** and automation
-- ✅ **Advanced Reporting** and analytics
-- ✅ **System Monitoring** and health checks
-- ✅ **Workflow Automation** with rules engine
-- ✅ **Multi-tenant Ready** architecture
-
-**Ready to deploy and use immediately!** 🚀

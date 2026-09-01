@@ -1,201 +1,206 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Search, FileText, CheckCircle, Clock, XCircle, DollarSign } from "lucide-react";
-import { format } from "date-fns";
+import { useEffect, useState } from 'react';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CheckCircle, Clock, DollarSign, FileText, Plus, Search, Trash2, XCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
+import { DataPagination } from '@/components/DataPagination';
+import { useDebounce } from '@/hooks/use-debounce';
+import { useAuth } from '@/contexts/AuthContext';
+import { api, errorMessage } from '@/lib/api';
+import { formatCurrency, formatDate, humanise } from '@/lib/format';
+
+interface PurchaseOrder {
+  id: string;
+  po_number: string;
+  title: string;
+  description: string | null;
+  status: string;
+  total_amount: number | null;
+  vendor_id: string | null;
+  vendor_name: string | null;
+  requested_by: string | null;
+  requested_by_name: string | null;
+  approved_by_name: string | null;
+  created_at: string;
+}
+
+interface Vendor {
+  id: string;
+  name: string;
+}
+
+interface PoStats {
+  total: number;
+  pending: number;
+  approved: number;
+  total_value: number;
+}
+
+/** Mirrors PO_TRANSITIONS in worker/src/routes/procurement.ts. */
+const TRANSITIONS: Record<string, string[]> = {
+  draft: ['pending', 'cancelled'],
+  pending: ['approved', 'rejected', 'cancelled'],
+  approved: ['ordered', 'cancelled'],
+  ordered: ['received', 'cancelled'],
+  rejected: ['draft'],
+  received: [],
+  cancelled: [],
+};
+
+const ADMIN_ONLY_TRANSITIONS = new Set(['approved', 'rejected', 'ordered', 'received']);
+
+const STATUS_ICON: Record<string, typeof FileText> = {
+  draft: FileText,
+  pending: Clock,
+  approved: CheckCircle,
+  ordered: DollarSign,
+  received: CheckCircle,
+  rejected: XCircle,
+  cancelled: XCircle,
+};
+
+const NO_VENDOR = 'none';
+const PAGE_SIZE = 20;
 
 export default function PurchaseOrders() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const { isAdmin, profile } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const { data: purchaseOrders, isLoading } = useQuery({
-    queryKey: ["purchase-orders", searchTerm, statusFilter],
-    queryFn: async () => {
-      let query = supabase
-        .from("purchase_orders")
-        .select(`
-          *,
-          vendor:vendors(name),
-          requested_by_profile:profiles!purchase_orders_requested_by_fkey(full_name),
-          approved_by_profile:profiles!purchase_orders_approved_by_fkey(full_name)
-        `)
-        .order("created_at", { ascending: false });
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const [creating, setCreating] = useState(false);
+  const search = useDebounce(searchTerm);
 
-      if (statusFilter !== "all") {
-        query = query.eq("status", statusFilter);
-      }
+  useEffect(() => setPage(1), [search, statusFilter]);
 
-      if (searchTerm) {
-        query = query.or(
-          `po_number.ilike.%${searchTerm}%,title.ilike.%${searchTerm}%`
-        );
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return data;
-    },
+  const { data, isLoading } = useQuery({
+    queryKey: ['purchase-orders', search, statusFilter, page],
+    queryFn: () =>
+      api.getPage<PurchaseOrder[]>('/purchase-orders', {
+        search,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        page,
+        pageSize: PAGE_SIZE,
+      }),
+    placeholderData: keepPreviousData,
   });
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "draft":
-        return "secondary";
-      case "pending_approval":
-        return "warning";
-      case "approved":
-        return "success";
-      case "rejected":
-        return "destructive";
-      case "completed":
-        return "default";
-      default:
-        return "outline";
-    }
+  const { data: stats } = useQuery({ queryKey: ['po-stats'], queryFn: () => api.get<PoStats>('/purchase-orders/stats') });
+  const { data: vendors } = useQuery({
+    queryKey: ['vendors-lookup'],
+    queryFn: () => api.getPage<Vendor[]>('/vendors', { pageSize: 100 }),
+  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+    queryClient.invalidateQueries({ queryKey: ['po-stats'] });
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "draft":
-        return FileText;
-      case "pending_approval":
-        return Clock;
-      case "approved":
-        return CheckCircle;
-      case "rejected":
-        return XCircle;
-      case "completed":
-        return CheckCircle;
-      default:
-        return FileText;
-    }
-  };
+  const createMutation = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => api.post('/purchase-orders', payload),
+    onSuccess: () => {
+      invalidate();
+      setCreating(false);
+      toast({ title: 'Purchase order drafted' });
+    },
+    onError: (error) => toast({ title: 'Could not create the order', description: errorMessage(error), variant: 'destructive' }),
+  });
 
-  const formatCurrency = (amount: number | null) => {
-    if (!amount) return "$0.00";
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
-  };
+  const transitionMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) => api.put(`/purchase-orders/${id}`, { status }),
+    onSuccess: () => {
+      invalidate();
+      toast({ title: 'Purchase order updated' });
+    },
+    onError: (error) => toast({ title: 'Transition rejected', description: errorMessage(error), variant: 'destructive' }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.del(`/purchase-orders/${id}`),
+    onSuccess: () => {
+      invalidate();
+      toast({ title: 'Purchase order deleted' });
+    },
+    onError: (error) => toast({ title: 'Could not delete', description: errorMessage(error), variant: 'destructive' }),
+  });
+
+  const orders = data?.data ?? [];
+
+  const allowedTransitions = (order: PurchaseOrder) =>
+    (TRANSITIONS[order.status] ?? []).filter((next) => {
+      if (ADMIN_ONLY_TRANSITIONS.has(next)) return isAdmin;
+      return isAdmin || order.requested_by === profile?.id;
+    });
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold">Purchase Orders</h1>
+          <h1 className="text-3xl font-bold">Purchase orders</h1>
           <p className="text-muted-foreground">Manage procurement and approvals</p>
         </div>
-        <Link to="/purchase-orders/new">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            New Purchase Order
-          </Button>
-        </Link>
+        <Button onClick={() => setCreating(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          New order
+        </Button>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total POs</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{purchaseOrders?.length || 0}</div>
-            <p className="text-xs text-muted-foreground">All time</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Approval</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {purchaseOrders?.filter(po => po.status === "pending_approval").length || 0}
-            </div>
-            <p className="text-xs text-muted-foreground">Awaiting review</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Approved</CardTitle>
-            <CheckCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {purchaseOrders?.filter(po => po.status === "approved").length || 0}
-            </div>
-            <p className="text-xs text-muted-foreground">Ready for procurement</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Value</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(
-                purchaseOrders?.reduce((sum, po) => sum + (po.total_amount || 0), 0) || 0
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">Approved orders</p>
-          </CardContent>
-        </Card>
+        {[
+          { label: 'Total orders', value: (stats?.total ?? 0).toLocaleString(), icon: FileText },
+          { label: 'Awaiting approval', value: (stats?.pending ?? 0).toLocaleString(), icon: Clock },
+          { label: 'Approved', value: (stats?.approved ?? 0).toLocaleString(), icon: CheckCircle },
+          { label: 'Committed value', value: formatCurrency(stats?.total_value), icon: DollarSign },
+        ].map((card) => {
+          const Icon = card.icon;
+          return (
+            <Card key={card.label}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{card.label}</CardTitle>
+                <Icon className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{card.value}</div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
-      {/* Filters and Table */}
       <Card>
-        <CardHeader>
-          <CardTitle>Purchase Orders</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="pt-6">
           <div className="grid gap-4 md:grid-cols-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search POs..."
+                placeholder="Search by number or title"
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(event) => setSearchTerm(event.target.value)}
                 className="pl-8"
+                aria-label="Search purchase orders"
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger>
+              <SelectTrigger aria-label="Filter by status">
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="pending_approval">Pending Approval</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
-                <SelectItem value="rejected">Rejected</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="all">All statuses</SelectItem>
+                {Object.keys(TRANSITIONS).map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {humanise(status)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -205,75 +210,139 @@ export default function PurchaseOrders() {
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-8 text-center">Loading purchase orders...</div>
-          ) : !purchaseOrders || purchaseOrders.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">
-              No purchase orders found. Create your first purchase order to get started!
-            </div>
+            <div className="p-8 text-center text-muted-foreground">Loading purchase orders…</div>
+          ) : orders.length === 0 ? (
+            <div className="p-8 text-center text-muted-foreground">No purchase orders match these filters.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>PO Number</TableHead>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Vendor</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Total Amount</TableHead>
-                    <TableHead>Requested By</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {purchaseOrders.map((po: any) => {
-                    const StatusIcon = getStatusIcon(po.status);
-                    return (
-                      <TableRow key={po.id}>
-                        <TableCell>
-                          <Link
-                            to={`/purchase-orders/${po.id}`}
-                            className="font-medium text-primary hover:underline"
-                          >
-                            {po.po_number}
-                          </Link>
-                        </TableCell>
-                        <TableCell className="font-medium">{po.title}</TableCell>
-                        <TableCell>{po.vendor?.name || "N/A"}</TableCell>
-                        <TableCell>
-                          <Badge variant={getStatusColor(po.status) as any}>
-                            <StatusIcon className="mr-1 h-3 w-3" />
-                            {po.status.replace("_", " ")}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{formatCurrency(po.total_amount)}</TableCell>
-                        <TableCell>{po.requested_by_profile?.full_name}</TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {format(new Date(po.created_at), "MMM d, yyyy")}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Link to={`/purchase-orders/${po.id}`}>
-                              <Button variant="ghost" size="sm">
-                                View
-                              </Button>
-                            </Link>
-                            {po.status === "pending_approval" && (
-                              <Button variant="ghost" size="sm">
-                                Approve
-                              </Button>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>PO number</TableHead>
+                      <TableHead>Title</TableHead>
+                      <TableHead>Vendor</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Requested by</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {orders.map((order) => {
+                      const Icon = STATUS_ICON[order.status] ?? FileText;
+                      const transitions = allowedTransitions(order);
+                      const canDelete = isAdmin && ['draft', 'rejected', 'cancelled'].includes(order.status);
+                      return (
+                        <TableRow key={order.id}>
+                          <TableCell className="font-medium">{order.po_number}</TableCell>
+                          <TableCell>{order.title}</TableCell>
+                          <TableCell>{order.vendor_name ?? '—'}</TableCell>
+                          <TableCell>{formatCurrency(order.total_amount)}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              <Icon className="mr-1 h-3 w-3" />
+                              {humanise(order.status)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{order.requested_by_name ?? '—'}</TableCell>
+                          <TableCell className="text-muted-foreground">{formatDate(order.created_at)}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex flex-wrap justify-end gap-1">
+                              {transitions.map((next) => (
+                                <Button
+                                  key={next}
+                                  size="sm"
+                                  variant={next === 'approved' ? 'default' : 'outline'}
+                                  disabled={transitionMutation.isPending}
+                                  onClick={() => transitionMutation.mutate({ id: order.id, status: next })}
+                                >
+                                  {humanise(next)}
+                                </Button>
+                              ))}
+                              {canDelete ? (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => deleteMutation.mutate(order.id)}
+                                  aria-label="Delete purchase order"
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+              <DataPagination meta={data?.meta} page={page} onPageChange={setPage} noun="orders" />
+            </>
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New purchase order</DialogTitle>
+            <DialogDescription>Orders start as a draft; submit one for approval when it is ready.</DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              createMutation.mutate({
+                title: String(form.get('title')),
+                description: String(form.get('description') ?? '') || undefined,
+                vendorId: form.get('vendorId') === NO_VENDOR ? undefined : String(form.get('vendorId')),
+                totalAmount: form.get('totalAmount') ? Number(form.get('totalAmount')) : undefined,
+              });
+            }}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="po-title">Title</Label>
+              <Input id="po-title" name="title" required minLength={3} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="po-vendor">Vendor</Label>
+              <Select name="vendorId" defaultValue={NO_VENDOR}>
+                <SelectTrigger id="po-vendor">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_VENDOR}>Not selected</SelectItem>
+                  {(vendors?.data ?? []).map((vendor) => (
+                    <SelectItem key={vendor.id} value={vendor.id}>
+                      {vendor.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="po-amount">Total amount</Label>
+              <Input id="po-amount" name="totalAmount" type="number" min="0" step="0.01" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="po-description">Description</Label>
+              <Textarea id="po-description" name="description" rows={3} />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCreating(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={createMutation.isPending}>
+                Create draft
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

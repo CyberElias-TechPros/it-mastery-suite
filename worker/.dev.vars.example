@@ -1,0 +1,7 @@
+# Local-only secrets for `wrangler dev`. Copy to .dev.vars (gitignored).
+# In preview/production these are set with: wrangler secret put <NAME> --env <env>
+JWT_SECRET="replace-with-at-least-32-random-characters"
+# Optional transactional email (Resend). Leave unset to log instead of sending.
+RESEND_API_KEY=""
+EMAIL_FROM="TechPros ITSM <itsm@example.com>"
+APP_BASE_URL="http://localhost:8080"

@@ -1,188 +1,205 @@
-import { createContext, useContext, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { api, apiFetch, errorMessage, getAccessToken, onAuthChange, refreshAccessToken, setAccessToken } from '@/lib/api';
 
-interface Profile {
+export type Role = 'admin' | 'technician' | 'employee';
+
+export interface Profile {
   id: string;
   email: string;
   full_name: string | null;
-  role: "admin" | "technician" | "employee";
+  role: Role;
   phone?: string | null;
   department?: string | null;
   avatar_url?: string | null;
   branch_id?: string | null;
   department_id?: string | null;
+  branch_name?: string | null;
+  department_name?: string | null;
+  is_active?: boolean | number;
   created_at?: string;
   updated_at?: string;
 }
 
-interface AuthContextType {
-  user: SupabaseUser | null;
+interface SessionPayload {
+  accessToken: string;
+  expiresIn: number;
+  user: Profile;
+}
+
+export interface AuthContextType {
+  /** Present for API compatibility with the previous provider: same object as `profile`. */
+  user: Profile | null;
   profile: Profile | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: any }>;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: any }>;
+  isAdmin: boolean;
+  isStaff: boolean;
+  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
-  updateProfile: (updates: Partial<Omit<Profile, 'id' | 'email' | 'role'>>) => Promise<{ error: any }>;
+  updateProfile: (updates: Partial<Omit<Profile, 'id' | 'email' | 'role'>>) => Promise<{ error: Error | null }>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ error: Error | null }>;
   refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/** Refresh the access token a minute before it expires. */
+const REFRESH_MARGIN_SECONDS = 60;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<SupabaseUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const refreshTimer = useRef<ReturnType<typeof setTimeout>>();
 
-  const fetchProfile = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", userId)
-        .maybeSingle();
-
-      if (error) throw error;
-      if (data) {
-        setProfile({
-          id: data.id,
-          email: data.email,
-          full_name: data.full_name,
-          role: data.role as "admin" | "technician" | "employee",
-          phone: data.phone,
-          department: data.department,
-          avatar_url: data.avatar_url,
-          created_at: data.created_at,
-          updated_at: data.updated_at,
-        });
-      }
-    } catch (error) {
-      console.error("Error fetching profile:", error);
-    }
-  };
-
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      }
-      setLoading(false);
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await fetchProfile(session.user.id);
-        } else {
-          setProfile(null);
-        }
-        setLoading(false);
-      }
-    );
-
-    return () => subscription.unsubscribe();
+  const scheduleRefresh = useCallback((expiresIn: number) => {
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    const delay = Math.max(expiresIn - REFRESH_MARGIN_SECONDS, 30) * 1000;
+    refreshTimer.current = setTimeout(() => {
+      void refreshAccessToken();
+    }, delay);
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) throw error;
-      return { error: null };
-    } catch (error: any) {
-      return { error: error.message };
-    }
-  };
-
-  const signUp = async (email: string, password: string, fullName: string) => {
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
-          },
-        },
-      });
-      if (error) throw error;
-      return { error: null };
-    } catch (error: any) {
-      return { error: error.message };
-    }
-  };
-
-  const signOut = async () => {
-    try {
-      await supabase.auth.signOut();
-      setUser(null);
-      setProfile(null);
-      navigate("/auth");
-    } catch (error) {
-      console.error("Logout error:", error);
-    }
-  };
-
-  const updateProfile = async (updates: Partial<Omit<Profile, 'id' | 'email' | 'role'>>) => {
-    if (!user) return { error: "Not authenticated" };
-    
-    try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          full_name: updates.full_name,
-          phone: updates.phone,
-          department: updates.department,
-          avatar_url: updates.avatar_url,
-        })
-        .eq("id", user.id);
-
-      if (error) throw error;
-      
-      // Refresh profile data
-      await fetchProfile(user.id);
-      return { error: null };
-    } catch (error: any) {
-      return { error: error.message };
-    }
-  };
-
-  const refreshProfile = async () => {
-    if (user) {
-      await fetchProfile(user.id);
-    }
-  };
-
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        profile,
-        loading,
-        signIn,
-        signUp,
-        signOut,
-        updateProfile,
-        refreshProfile,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const adoptSession = useCallback(
+    (session: SessionPayload) => {
+      setAccessToken(session.accessToken);
+      setProfile(session.user);
+      scheduleRefresh(session.expiresIn);
+    },
+    [scheduleRefresh],
   );
+
+  // Restore a session from the HttpOnly refresh cookie on first load.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await apiFetch<SessionPayload>('/auth/refresh', { method: 'POST', json: {}, skipRefresh: true });
+        if (!cancelled && data?.accessToken) adoptSession(data);
+      } catch {
+        if (!cancelled) {
+          setAccessToken(null);
+          setProfile(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [adoptSession]);
+
+  // If any request ends up clearing the token, drop the profile too.
+  useEffect(
+    () =>
+      onAuthChange((token) => {
+        if (!token) {
+          setProfile(null);
+          if (refreshTimer.current) clearTimeout(refreshTimer.current);
+        }
+      }),
+    [],
+  );
+
+  useEffect(() => () => refreshTimer.current && clearTimeout(refreshTimer.current), []);
+
+  const signIn = useCallback<AuthContextType['signIn']>(
+    async (email, password) => {
+      try {
+        const session = await api.post<SessionPayload>('/auth/login', { email, password }, { skipRefresh: true });
+        adoptSession(session);
+        return { error: null };
+      } catch (error) {
+        return { error: new Error(errorMessage(error, 'Unable to sign in.')) };
+      }
+    },
+    [adoptSession],
+  );
+
+  const signUp = useCallback<AuthContextType['signUp']>(
+    async (email, password, fullName) => {
+      try {
+        const session = await api.post<SessionPayload>('/auth/register', { email, password, fullName }, { skipRefresh: true });
+        adoptSession(session);
+        return { error: null };
+      } catch (error) {
+        return { error: new Error(errorMessage(error, 'Unable to create the account.')) };
+      }
+    },
+    [adoptSession],
+  );
+
+  const signOut = useCallback(async () => {
+    try {
+      if (getAccessToken()) await api.post('/auth/logout', {});
+    } catch {
+      // Signing out locally must succeed even if the API call fails.
+    } finally {
+      setAccessToken(null);
+      setProfile(null);
+      navigate('/auth', { replace: true });
+    }
+  }, [navigate]);
+
+  const refreshProfile = useCallback(async () => {
+    try {
+      setProfile(await api.get<Profile>('/auth/me'));
+    } catch {
+      // Ignored: the interceptor already handles expired sessions.
+    }
+  }, []);
+
+  const updateProfile = useCallback<AuthContextType['updateProfile']>(async (updates) => {
+    try {
+      const updated = await api.put<Profile>('/auth/me', {
+        fullName: updates.full_name ?? undefined,
+        phone: updates.phone ?? undefined,
+        department: updates.department ?? undefined,
+        avatarUrl: updates.avatar_url ?? undefined,
+      });
+      setProfile(updated);
+      return { error: null };
+    } catch (error) {
+      return { error: new Error(errorMessage(error, 'Unable to update your profile.')) };
+    }
+  }, []);
+
+  const changePassword = useCallback<AuthContextType['changePassword']>(async (currentPassword, newPassword) => {
+    try {
+      await api.post('/auth/change-password', { currentPassword, newPassword });
+      // The API revokes every session on a credential change, so drop ours too.
+      setAccessToken(null);
+      setProfile(null);
+      return { error: null };
+    } catch (error) {
+      return { error: new Error(errorMessage(error, 'Unable to change your password.')) };
+    }
+  }, []);
+
+  const value = useMemo<AuthContextType>(
+    () => ({
+      user: profile,
+      profile,
+      loading,
+      isAdmin: profile?.role === 'admin',
+      isStaff: profile?.role === 'admin' || profile?.role === 'technician',
+      signIn,
+      signUp,
+      signOut,
+      updateProfile,
+      changePassword,
+      refreshProfile,
+    }),
+    [profile, loading, signIn, signUp, signOut, updateProfile, changePassword, refreshProfile],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
+  if (context === undefined) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 }

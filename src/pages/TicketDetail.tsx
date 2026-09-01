@@ -1,288 +1,174 @@
-import { useState, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Separator } from "@/components/ui/separator";
+import { useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
-import { FileUpload } from "@/components/FileUpload";
-import {
+  AlertTriangle,
   ArrowLeft,
+  CheckCircle2,
   Clock,
-  User,
   MessageSquare,
   Paperclip,
   Send,
-  Edit,
-  CheckCircle2,
-  AlertTriangle,
-  Calendar,
   Tag,
-  Download,
-  File
-} from "lucide-react";
-import { format } from "date-fns";
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { useToast } from '@/hooks/use-toast';
+import { FileUpload } from '@/components/FileUpload';
+import { AttachmentList } from '@/components/AttachmentList';
+import { useAuth } from '@/contexts/AuthContext';
+import { api, errorMessage } from '@/lib/api';
+import { formatDateTime, humanise, priorityVariant } from '@/lib/format';
+
+interface Ticket {
+  id: string;
+  ticket_number: string;
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  category: string;
+  resolution: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  sla_due_date: string | null;
+  created_by: string;
+  assigned_to: string | null;
+  created_by_name: string | null;
+  assigned_to_name: string | null;
+}
+
+interface Comment {
+  id: string;
+  comment: string;
+  is_internal: number | boolean;
+  created_at: string;
+  user_name: string | null;
+}
+
+interface AssignableUser {
+  id: string;
+  full_name: string | null;
+  role: string;
+}
+
+const UNASSIGNED = 'unassigned';
 
 export default function TicketDetail() {
-  const { id } = useParams();
-  const navigate = useNavigate();
-  const { user, profile } = useAuth();
+  const { id = '' } = useParams();
+  const { profile, isStaff } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [newComment, setNewComment] = useState("");
+
+  const [newComment, setNewComment] = useState('');
   const [isInternal, setIsInternal] = useState(false);
-  const [editingStatus, setEditingStatus] = useState(false);
-  const [editingPriority, setEditingPriority] = useState(false);
-  const [editingAssignee, setEditingAssignee] = useState(false);
-  const [status, setStatus] = useState("");
-  const [priority, setPriority] = useState("");
-  const [assignee, setAssignee] = useState("");
+  const [status, setStatus] = useState('');
+  const [priority, setPriority] = useState('');
+  const [assignee, setAssignee] = useState(UNASSIGNED);
+  const [resolution, setResolution] = useState('');
 
-  const { data: ticket, isLoading } = useQuery({
-    queryKey: ["ticket", id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("tickets")
-        .select(`
-          *,
-          created_by_profile:profiles!tickets_created_by_fkey(full_name, email, avatar_url),
-          assigned_to_profile:profiles!tickets_assigned_to_fkey(full_name, email, avatar_url)
-        `)
-        .eq("id", id)
-        .single();
-
-      if (error) throw error;
-      return data;
-    },
+  const { data: ticket, isLoading, error } = useQuery({
+    queryKey: ['ticket', id],
+    queryFn: () => api.get<Ticket>(`/tickets/${id}`),
+    enabled: Boolean(id),
   });
 
-  const { data: comments } = useQuery({
-    queryKey: ["ticket-comments", id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("ticket_comments")
-        .select(`
-          *,
-          user_profile:profiles!ticket_comments_user_id_fkey(full_name, email, avatar_url)
-        `)
-        .eq("ticket_id", id)
-        .order("created_at", { ascending: true });
-
-      if (error) throw error;
-      return data || [];
-    },
+  const { data: comments = [] } = useQuery({
+    queryKey: ['ticket-comments', id],
+    queryFn: () => api.get<Comment[]>(`/tickets/${id}/comments`),
+    enabled: Boolean(id),
   });
 
-  const { data: attachments } = useQuery({
-    queryKey: ["ticket-attachments", id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("attachments")
-        .select("*")
-        .eq("resource_type", "ticket")
-        .eq("resource_id", id)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      return data || [];
-    },
-  });
-
-  const { data: users } = useQuery({
-    queryKey: ["users"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name, email, role")
-        .in("role", ["admin", "technician"]);
-
-      if (error) throw error;
-      return data || [];
-    },
-  });
-
-  const updateTicketMutation = useMutation({
-    mutationFn: async (updates: any) => {
-      const { data, error } = await supabase
-        .from("tickets")
-        .update(updates)
-        .eq("id", id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["ticket", id] });
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
-      toast({
-        title: "Success",
-        description: "Ticket updated successfully",
-      });
-      setEditingStatus(false);
-      setEditingPriority(false);
-      setEditingAssignee(false);
-    },
-    onError: (error) => {
-      toast({
-        title: "Error",
-        description: "Failed to update ticket",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const addCommentMutation = useMutation({
-    mutationFn: async (commentData: any) => {
-      const { data, error } = await supabase
-        .from("ticket_comments")
-        .insert(commentData)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["ticket-comments", id] });
-      setNewComment("");
-      setIsInternal(false);
-      toast({
-        title: "Success",
-        description: "Comment added successfully",
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: "Error",
-        description: "Failed to add comment",
-        variant: "destructive",
-      });
-    },
+  const { data: assignees = [] } = useQuery({
+    queryKey: ['assignable-users'],
+    queryFn: () => api.get<AssignableUser[]>('/users/assignable'),
+    enabled: isStaff,
   });
 
   useEffect(() => {
-    if (ticket) {
-      setStatus(ticket.status);
-      setPriority(ticket.priority);
-      setAssignee(ticket.assigned_to || "");
-    }
+    if (!ticket) return;
+    setStatus(ticket.status);
+    setPriority(ticket.priority);
+    setAssignee(ticket.assigned_to ?? UNASSIGNED);
+    setResolution(ticket.resolution ?? '');
   }, [ticket]);
 
-  const handleStatusUpdate = () => {
-    updateTicketMutation.mutate({ status });
-  };
+  const updateMutation = useMutation({
+    mutationFn: (updates: Record<string, unknown>) => api.put<Ticket>(`/tickets/${id}`, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ticket', id] });
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      toast({ title: 'Ticket updated' });
+    },
+    onError: (mutationError) =>
+      toast({ title: 'Update failed', description: errorMessage(mutationError), variant: 'destructive' }),
+  });
 
-  const handlePriorityUpdate = () => {
-    updateTicketMutation.mutate({ priority });
-  };
+  const commentMutation = useMutation({
+    mutationFn: (payload: { comment: string; isInternal: boolean }) => api.post(`/tickets/${id}/comments`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ticket-comments', id] });
+      setNewComment('');
+      setIsInternal(false);
+      toast({ title: 'Comment added' });
+    },
+    onError: (mutationError) =>
+      toast({ title: 'Could not add comment', description: errorMessage(mutationError), variant: 'destructive' }),
+  });
 
-  const handleAssigneeUpdate = () => {
-    updateTicketMutation.mutate({ assigned_to: assignee || null });
-  };
+  if (isLoading) return <div className="flex justify-center p-8 text-muted-foreground">Loading ticket…</div>;
 
-  const handleAddComment = () => {
-    if (!newComment.trim()) return;
-
-    addCommentMutation.mutate({
-      ticket_id: id,
-      user_id: user?.id,
-      comment: newComment,
-      is_internal: isInternal,
-    });
-  };
-
-  const handleFileUploaded = (fileData: any) => {
-    queryClient.invalidateQueries({ queryKey: ["ticket-attachments", id] });
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case "critical":
-        return "destructive";
-      case "high":
-        return "destructive";
-      case "medium":
-        return "warning";
-      default:
-        return "secondary";
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "open":
-        return "default";
-      case "in_progress":
-        return "warning";
-      case "resolved":
-        return "success";
-      case "closed":
-        return "secondary";
-      default:
-        return "outline";
-    }
-  };
-
-  const canEditTicket = () => {
-    return profile?.role === "admin" || profile?.role === "technician";
-  };
-
-  if (isLoading) {
-    return <div className="flex justify-center p-8">Loading ticket...</div>;
+  if (error || !ticket) {
+    return (
+      <div className="space-y-4">
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Ticket unavailable</AlertTitle>
+          <AlertDescription>{errorMessage(error, 'This ticket does not exist or you cannot access it.')}</AlertDescription>
+        </Alert>
+        <Button asChild variant="outline">
+          <Link to="/tickets">Back to tickets</Link>
+        </Button>
+      </div>
+    );
   }
 
-  if (!ticket) {
-    return <div className="flex justify-center p-8">Ticket not found</div>;
-  }
+  const isRequester = ticket.created_by === profile?.id;
+  const canManage = isStaff;
+  const isClosed = ticket.status === 'closed';
+  const overdue = ticket.sla_due_date && ['open', 'in_progress'].includes(ticket.status) && new Date(ticket.sla_due_date) < new Date();
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Link to="/tickets">
-          <Button variant="ghost" size="sm">
+      <div className="flex flex-wrap items-center gap-4">
+        <Button asChild variant="ghost" size="sm">
+          <Link to="/tickets">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Tickets
-          </Button>
-        </Link>
+            Back to tickets
+          </Link>
+        </Button>
         <div className="flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-bold">Ticket {ticket.ticket_number}</h1>
-            <Badge variant={getStatusColor(ticket.status) as any}>
-              {ticket.status.replace("_", " ")}
-            </Badge>
+            <Badge variant="outline">{humanise(ticket.status)}</Badge>
+            {overdue ? <Badge variant="destructive">Overdue</Badge> : null}
           </div>
           <p className="text-muted-foreground">{ticket.title}</p>
         </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
-        {/* Main Content */}
-        <div className="md:col-span-2 space-y-6">
-          {/* Ticket Description */}
+        <div className="space-y-6 md:col-span-2">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -295,179 +181,159 @@ export default function TicketDetail() {
             </CardContent>
           </Card>
 
-          {/* Attachments Section */}
+          {ticket.resolution ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CheckCircle2 className="h-5 w-5" />
+                  Resolution
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="whitespace-pre-wrap">{ticket.resolution}</p>
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Paperclip className="h-5 w-5" />
-                Attachments ({attachments?.length || 0})
+                Attachments
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {attachments && attachments.length > 0 && (
-                <div className="space-y-2">
-                  {attachments.map((attachment: any) => (
-                    <div key={attachment.id} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <File className="h-5 w-5 text-muted-foreground" />
-                        <div>
-                          <p className="font-medium">{attachment.file_name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {formatFileSize(attachment.file_size || 0)} • Uploaded {format(new Date(attachment.created_at), "MMM d, yyyy")}
-                          </p>
-                        </div>
-                      </div>
-                      <Button variant="ghost" size="sm" asChild>
-                        <a href={attachment.file_path} target="_blank" rel="noopener noreferrer">
-                          <Download className="h-4 w-4" />
-                        </a>
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
+              <AttachmentList resourceType="ticket" resourceId={id} />
               <FileUpload
-                onFileUploaded={handleFileUploaded}
+                onFileUploaded={() => queryClient.invalidateQueries({ queryKey: ['attachments', 'ticket', id] })}
                 resourceType="ticket"
-                resourceId={id || ""}
-                accept="image/*,.pdf,.doc,.docx,.txt,.zip"
-                maxSize={10}
-                multiple={true}
+                resourceId={id}
+                multiple
               />
             </CardContent>
           </Card>
 
-          {/* Comments Section */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <MessageSquare className="h-5 w-5" />
-                Comments ({comments?.length || 0})
+                Comments ({comments.length})
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Existing Comments */}
               <div className="space-y-4">
-                {comments?.map((comment: any) => (
-                  <div key={comment.id} className="flex gap-3">
-                    <Avatar className="h-8 w-8">
-                      <AvatarFallback>
-                        {comment.user_profile?.full_name?.charAt(0) || "U"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium text-sm">
-                          {comment.user_profile?.full_name}
-                        </span>
-                        {comment.is_internal && (
-                          <Badge variant="outline" className="text-xs">
-                            Internal
-                          </Badge>
-                        )}
-                        <span className="text-xs text-muted-foreground">
-                          {format(new Date(comment.created_at), "MMM d, yyyy 'at' h:mm a")}
-                        </span>
+                {comments.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No comments yet.</p>
+                ) : (
+                  comments.map((comment) => (
+                    <div key={comment.id} className="flex gap-3">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback>{comment.user_name?.charAt(0)?.toUpperCase() ?? 'U'}</AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1">
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium">{comment.user_name ?? 'Unknown'}</span>
+                          {comment.is_internal ? (
+                            <Badge variant="outline" className="text-xs">
+                              Internal
+                            </Badge>
+                          ) : null}
+                          <span className="text-xs text-muted-foreground">{formatDateTime(comment.created_at)}</span>
+                        </div>
+                        <p className="whitespace-pre-wrap text-sm">{comment.comment}</p>
                       </div>
-                      <p className="text-sm">{comment.comment}</p>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
 
               <Separator />
 
-              {/* Add Comment */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="comment">Add Comment</Label>
-                  {canEditTicket() && (
-                    <label className="flex items-center gap-1 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={isInternal}
-                        onChange={(e) => setIsInternal(e.target.checked)}
-                        className="rounded"
-                      />
-                      Internal Note
-                    </label>
-                  )}
+              {isClosed ? (
+                <p className="text-sm text-muted-foreground">
+                  This ticket is closed. Reopen it to continue the conversation.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <Label htmlFor="comment">Add a comment</Label>
+                    {canManage ? (
+                      <label className="flex items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={isInternal}
+                          onCheckedChange={(checked) => setIsInternal(checked === true)}
+                          aria-label="Internal note"
+                        />
+                        Internal note
+                      </label>
+                    ) : null}
+                  </div>
+                  <div className="flex gap-2">
+                    <Textarea
+                      id="comment"
+                      placeholder="Share an update…"
+                      value={newComment}
+                      onChange={(event) => setNewComment(event.target.value)}
+                      rows={3}
+                      className="flex-1"
+                    />
+                    <Button
+                      onClick={() => commentMutation.mutate({ comment: newComment.trim(), isInternal })}
+                      disabled={!newComment.trim() || commentMutation.isPending}
+                      size="sm"
+                      className="self-end"
+                      aria-label="Send comment"
+                    >
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Textarea
-                    id="comment"
-                    placeholder="Add a comment..."
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    rows={3}
-                    className="flex-1"
-                  />
-                  <Button
-                    onClick={handleAddComment}
-                    disabled={!newComment.trim() || addCommentMutation.isPending}
-                    size="sm"
-                    className="self-end"
-                  >
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Sidebar */}
         <div className="space-y-6">
-          {/* Ticket Details */}
           <Card>
             <CardHeader>
-              <CardTitle>Ticket Details</CardTitle>
+              <CardTitle>Ticket details</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Status</Label>
-                {editingStatus ? (
+                <Label htmlFor="status">Status</Label>
+                {canManage || isRequester ? (
                   <div className="flex gap-2">
                     <Select value={status} onValueChange={setStatus}>
-                      <SelectTrigger className="flex-1">
+                      <SelectTrigger id="status" className="flex-1">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="open">Open</SelectItem>
-                        <SelectItem value="in_progress">In Progress</SelectItem>
+                        <SelectItem value="in_progress">In progress</SelectItem>
                         <SelectItem value="resolved">Resolved</SelectItem>
                         <SelectItem value="closed">Closed</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Button size="sm" onClick={handleStatusUpdate} disabled={updateTicketMutation.isPending}>
+                    <Button
+                      size="sm"
+                      onClick={() => updateMutation.mutate({ status })}
+                      disabled={updateMutation.isPending || status === ticket.status}
+                      aria-label="Save status"
+                    >
                       <CheckCircle2 className="h-4 w-4" />
                     </Button>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-between">
-                    <Badge variant={getStatusColor(ticket.status) as any}>
-                      {ticket.status.replace("_", " ")}
-                    </Badge>
-                    {canEditTicket() && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingStatus(true)}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
+                  <Badge variant="outline">{humanise(ticket.status)}</Badge>
                 )}
               </div>
 
               <div className="space-y-2">
-                <Label>Priority</Label>
-                {editingPriority ? (
+                <Label htmlFor="priority">Priority</Label>
+                {canManage ? (
                   <div className="flex gap-2">
                     <Select value={priority} onValueChange={setPriority}>
-                      <SelectTrigger className="flex-1">
+                      <SelectTrigger id="priority" className="flex-1">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -477,77 +343,79 @@ export default function TicketDetail() {
                         <SelectItem value="critical">Critical</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Button size="sm" onClick={handlePriorityUpdate} disabled={updateTicketMutation.isPending}>
+                    <Button
+                      size="sm"
+                      onClick={() => updateMutation.mutate({ priority })}
+                      disabled={updateMutation.isPending || priority === ticket.priority}
+                      aria-label="Save priority"
+                    >
                       <CheckCircle2 className="h-4 w-4" />
                     </Button>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-between">
-                    <Badge variant={getPriorityColor(ticket.priority) as any}>
-                      {ticket.priority}
-                    </Badge>
-                    {canEditTicket() && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingPriority(true)}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
+                  <Badge variant={priorityVariant(ticket.priority)}>{humanise(ticket.priority)}</Badge>
                 )}
               </div>
 
               <div className="space-y-2">
                 <Label>Category</Label>
-                <Badge variant="outline" className="capitalize">
-                  {ticket.category.replace("_", " ")}
-                </Badge>
+                <Badge variant="outline">{humanise(ticket.category)}</Badge>
               </div>
 
               <div className="space-y-2">
-                <Label>Assigned To</Label>
-                {editingAssignee ? (
+                <Label htmlFor="assignee">Assigned to</Label>
+                {canManage ? (
                   <div className="flex gap-2">
                     <Select value={assignee} onValueChange={setAssignee}>
-                      <SelectTrigger className="flex-1">
+                      <SelectTrigger id="assignee" className="flex-1">
                         <SelectValue placeholder="Select assignee" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Unassigned</SelectItem>
-                        {users?.map((user) => (
-                          <SelectItem key={user.id} value={user.id}>
-                            {user.full_name}
+                        <SelectItem value={UNASSIGNED}>Unassigned</SelectItem>
+                        {assignees.map((person) => (
+                          <SelectItem key={person.id} value={person.id}>
+                            {person.full_name ?? 'Unnamed'}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <Button size="sm" onClick={handleAssigneeUpdate} disabled={updateTicketMutation.isPending}>
+                    <Button
+                      size="sm"
+                      onClick={() => updateMutation.mutate({ assignedTo: assignee === UNASSIGNED ? null : assignee })}
+                      disabled={updateMutation.isPending || assignee === (ticket.assigned_to ?? UNASSIGNED)}
+                      aria-label="Save assignee"
+                    >
                       <CheckCircle2 className="h-4 w-4" />
                     </Button>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm">
-                      {ticket.assigned_to_profile?.full_name || "Unassigned"}
-                    </span>
-                    {canEditTicket() && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingAssignee(true)}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
+                  <p className="text-sm">{ticket.assigned_to_name ?? 'Unassigned'}</p>
                 )}
               </div>
+
+              {canManage ? (
+                <div className="space-y-2">
+                  <Label htmlFor="resolution">Resolution notes</Label>
+                  <Textarea
+                    id="resolution"
+                    rows={3}
+                    value={resolution}
+                    placeholder="How was this resolved?"
+                    onChange={(event) => setResolution(event.target.value)}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => updateMutation.mutate({ resolution })}
+                    disabled={updateMutation.isPending || resolution === (ticket.resolution ?? '')}
+                  >
+                    Save resolution
+                  </Button>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
-          {/* Timeline */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -555,42 +423,43 @@ export default function TicketDetail() {
                 Timeline
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 text-sm">
               <div className="flex gap-3">
-                <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">Ticket Created</p>
+                <span className="mt-2 h-2 w-2 rounded-full bg-blue-500" />
+                <div>
+                  <p className="font-medium">Ticket created</p>
                   <p className="text-xs text-muted-foreground">
-                    by {ticket.created_by_profile?.full_name} on {format(new Date(ticket.created_at), "MMM d, yyyy 'at' h:mm a")}
+                    by {ticket.created_by_name ?? 'Unknown'} on {formatDateTime(ticket.created_at)}
                   </p>
                 </div>
               </div>
-
-              {ticket.assigned_to && ticket.assigned_to !== ticket.created_by && (
+              {ticket.sla_due_date ? (
                 <div className="flex gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">Assigned to {ticket.assigned_to_profile?.full_name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {format(new Date(ticket.updated_at), "MMM d, yyyy 'at' h:mm a")}
-                    </p>
+                  <span className={`mt-2 h-2 w-2 rounded-full ${overdue ? 'bg-red-500' : 'bg-amber-500'}`} />
+                  <div>
+                    <p className="font-medium">SLA target</p>
+                    <p className="text-xs text-muted-foreground">{formatDateTime(ticket.sla_due_date)}</p>
                   </div>
                 </div>
-              )}
-
-              {comments?.map((comment: any) => (
-                <div key={comment.id} className="flex gap-3">
-                  <div className="w-2 h-2 bg-gray-500 rounded-full mt-2"></div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">
-                      Comment {comment.is_internal ? "(Internal)" : ""} by {comment.user_profile?.full_name}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {format(new Date(comment.created_at), "MMM d, yyyy 'at' h:mm a")}
-                    </p>
+              ) : null}
+              {ticket.assigned_to ? (
+                <div className="flex gap-3">
+                  <span className="mt-2 h-2 w-2 rounded-full bg-green-500" />
+                  <div>
+                    <p className="font-medium">Assigned to {ticket.assigned_to_name ?? 'a technician'}</p>
+                    <p className="text-xs text-muted-foreground">{formatDateTime(ticket.updated_at)}</p>
                   </div>
                 </div>
-              ))}
+              ) : null}
+              {ticket.resolved_at ? (
+                <div className="flex gap-3">
+                  <span className="mt-2 h-2 w-2 rounded-full bg-emerald-600" />
+                  <div>
+                    <p className="font-medium">Resolved</p>
+                    <p className="text-xs text-muted-foreground">{formatDateTime(ticket.resolved_at)}</p>
+                  </div>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </div>
