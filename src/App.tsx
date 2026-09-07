@@ -1,3 +1,4 @@
+import React, { Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -5,32 +6,33 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
-import Dashboard from "./pages/Dashboard";
-import Tickets from "./pages/Tickets";
-import NewTicket from "./pages/NewTicket";
-import Profile from "./pages/Profile";
-import Assets from "./pages/Assets";
-import NewAsset from "./pages/NewAsset";
-import Diesel from "./pages/Diesel";
-import NewDiesel from "./pages/NewDiesel";
-import TicketDetail from "./pages/TicketDetail";
-import Calendar from "./pages/Calendar";
-import Vendors from "./pages/Vendors";
-import NewVendor from "./pages/NewVendor";
-import PurchaseOrders from "./pages/PurchaseOrders";
-import KnowledgeBase from "./pages/KnowledgeBase";
-import NewKBArticle from "./pages/NewKBArticle";
-import KBArticleDetail from "./pages/KBArticleDetail";
-import Expenses from "./pages/Expenses";
-import NewExpense from "./pages/NewExpense";
-import Budgets from "./pages/Budgets";
-import Branches from "./pages/Branches";
-import Users from "./pages/Users";
-import Reports from "./pages/Reports";
-import SystemHealth from "./pages/SystemHealth";
-import AutomationRules from "./pages/AutomationRules";
-import Notifications from "./pages/Notifications";
+const Dashboard = React.lazy(() => import("./pages/Dashboard"));
+const Tickets = React.lazy(() => import("./pages/Tickets"));
+const NewTicket = React.lazy(() => import("./pages/NewTicket"));
+const Profile = React.lazy(() => import("./pages/Profile"));
+const Assets = React.lazy(() => import("./pages/Assets"));
+const NewAsset = React.lazy(() => import("./pages/NewAsset"));
+const Diesel = React.lazy(() => import("./pages/Diesel"));
+const NewDiesel = React.lazy(() => import("./pages/NewDiesel"));
+const TicketDetail = React.lazy(() => import("./pages/TicketDetail"));
+const Calendar = React.lazy(() => import("./pages/Calendar"));
+const Vendors = React.lazy(() => import("./pages/Vendors"));
+const NewVendor = React.lazy(() => import("./pages/NewVendor"));
+const PurchaseOrders = React.lazy(() => import("./pages/PurchaseOrders"));
+const KnowledgeBase = React.lazy(() => import("./pages/KnowledgeBase"));
+const NewKBArticle = React.lazy(() => import("./pages/NewKBArticle"));
+const KBArticleDetail = React.lazy(() => import("./pages/KBArticleDetail"));
+const Expenses = React.lazy(() => import("./pages/Expenses"));
+const NewExpense = React.lazy(() => import("./pages/NewExpense"));
+const Budgets = React.lazy(() => import("./pages/Budgets"));
+const Branches = React.lazy(() => import("./pages/Branches"));
+const Users = React.lazy(() => import("./pages/Users"));
+const Reports = React.lazy(() => import("./pages/Reports"));
+const SystemHealth = React.lazy(() => import("./pages/SystemHealth"));
+const AutomationRules = React.lazy(() => import("./pages/AutomationRules"));
+const Notifications = React.lazy(() => import("./pages/Notifications"));
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 import Landing from "./pages/Landing";
@@ -51,7 +53,9 @@ const App = () => (
         v7_relativeSplatPath: true,
       }}>
         <AuthProvider>
-          <Routes>
+          <ErrorBoundary>
+            <Suspense fallback={<div className="flex min-h-screen items-center justify-center">Loading...</div>}>
+            <Routes>
             {/* Public Pages */}
             <Route path="/landing" element={<Landing />} />
             <Route path="/features" element={<Features />} />
@@ -311,6 +315,8 @@ const App = () => (
             />
             <Route path="*" element={<NotFound />} />
           </Routes>
+            </Suspense>
+          </ErrorBoundary>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

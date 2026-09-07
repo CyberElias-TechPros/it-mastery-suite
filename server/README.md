@@ -315,4 +315,5 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**TechPros ITSM API Server** - Complete IT service management backend solution.
+**TechPros ITSM API Server** — Complete IT service management backend.  
+**Status:** Production Candidate (auth secured, validation added, deployment configs ready). See `AUDIT.md` for full assessment.

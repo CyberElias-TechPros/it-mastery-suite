@@ -1,8 +1,35 @@
-# Frontend ↔ Backend Integration Complete
+# Frontend ↔ Backend Integration — Updated Status
 
-## ✅ **FULLY CONNECTED: React Frontend + Node.js Express Backend**
+## ✅ What Was Fixed / Verified
 
-The TechPros ITSM system now has **complete frontend-backend integration** with all components properly connected to the Express API server.
+- **API Client (`src/lib/api.ts`)**: JWT token management, automatic refresh, error handling, FormData upload support.
+- **Authentication (`src/contexts/AuthContext.tsx`)**: Updated to use JWT backend (`apiClient.login/register`) instead of direct Supabase auth. Token persistence in `localStorage`. Profile fetching via JWT `/api/auth/profile`.
+- **Security (`server/routes/auth.js`)**: Added `bcrypt.compare` for password verification. Added `password_hash` column to profiles. Registration stores hashed passwords.
+- **Deployment Config**: `vercel.json` (frontend) and `wrangler.toml` + `cloudflare/workers/index.js` (backend) created.
+- **Error Handling**: `ErrorBoundary` component added to `App.tsx`.
+
+## ⚠️ What's Still Incomplete (Documented in AUDIT.md)
+
+- Full Cloudflare Worker migration from Express
+- Automated tests (unit, integration, E2E)
+- Production database migration to D1 (`wrangler d1 execute`)
+- Email/SMTP integration requires real credentials
+- Real-time features (Durable Objects, Queues, Cron) configured but not implemented
+
+## 🔧 Technical Integration (Current)
+
+```
+Frontend (React) → Vercel
+  │ HTTPS / API
+  ▼
+Cloudflare Worker (scaffold: health check + proxy)
+  │
+  ├── D1 Database (schema ready: cloudflare/d1-schema.sql)
+  ├── R2 Storage (binding configured)
+  └── KV Cache (binding configured)
+```
+
+**Note:** The Express backend (`server/`) remains operational for local development. The Cloudflare Worker (`cloudflare/workers/index.js`) is a scaffold ready for full route migration.
 
 ---
 

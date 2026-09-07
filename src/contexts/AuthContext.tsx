@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
+import { apiClient } from "@/lib/api";
 
 interface Profile {
   id: string;
@@ -18,7 +17,7 @@ interface Profile {
 }
 
 interface AuthContextType {
-  user: SupabaseUser | null;
+  user: { id: string; email: string } | null;
   profile: Profile | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
@@ -31,32 +30,33 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId?: string) => {
     try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", userId)
-        .maybeSingle();
-
-      if (error) throw error;
-      if (data) {
+      const response = await apiClient.getProfile();
+      const userData = response.user || response.profile || response;
+      if (userData) {
         setProfile({
-          id: data.id,
-          email: data.email,
-          full_name: data.full_name,
-          role: data.role as "admin" | "technician" | "employee",
-          phone: data.phone,
-          department: data.department,
-          avatar_url: data.avatar_url,
-          created_at: data.created_at,
-          updated_at: data.updated_at,
+          id: userData.id,
+          email: userData.email,
+          full_name: userData.full_name,
+          role: userData.role as "admin" | "technician" | "employee",
+          phone: userData.phone,
+          department: userData.department || userData.department_id,
+          avatar_url: userData.avatar_url,
+          branch_id: userData.branch_id,
+          department_id: userData.department_id,
+          created_at: userData.created_at,
+          updated_at: userData.updated_at,
         });
+        // If we have a user object from JWT token, sync it
+        if (!user && userData.id && userData.email) {
+          setUser({ id: userData.id, email: userData.email });
+        }
       }
     } catch (error) {
       console.error("Error fetching profile:", error);
@@ -64,101 +64,97 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      }
+    // Check for existing JWT tokens on mount
+    const accessToken = localStorage.getItem("accessToken");
+    if (accessToken) {
+      // Try to restore session by fetching profile
+      apiClient.getProfile()
+        .then((response) => {
+          const userData = response.user || response.profile || response;
+          if (userData) {
+            setUser({ id: userData.id, email: userData.email });
+            setProfile({
+              id: userData.id,
+              email: userData.email,
+              full_name: userData.full_name,
+              role: userData.role,
+              phone: userData.phone,
+              department: userData.department || userData.department_id,
+              avatar_url: userData.avatar_url,
+              branch_id: userData.branch_id,
+              department_id: userData.department_id,
+              created_at: userData.created_at,
+              updated_at: userData.updated_at,
+            });
+          }
+        })
+        .catch((error) => {
+          // Token may be invalid; clear it
+          localStorage.removeItem("accessToken");
+          localStorage.removeItem("refreshToken");
+          console.error("Session restore failed:", error);
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    } else {
       setLoading(false);
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await fetchProfile(session.user.id);
-        } else {
-          setProfile(null);
-        }
-        setLoading(false);
-      }
-    );
-
-    return () => subscription.unsubscribe();
+    }
   }, []);
 
   const signIn = async (email: string, password: string) => {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) throw error;
+      const data = await apiClient.login(email, password);
+      const userData = data.user || data.profile || data;
+      if (userData && userData.id && userData.email) {
+        setUser({ id: userData.id, email: userData.email });
+      }
+      // Fetch profile for full details
+      await fetchProfile();
       return { error: null };
     } catch (error: any) {
-      return { error: error.message };
+      return { error: error.message || "Login failed" };
     }
   };
 
   const signUp = async (email: string, password: string, fullName: string) => {
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
-          },
-        },
-      });
-      if (error) throw error;
+      const data = await apiClient.register(email, password, fullName);
+      const userData = data.user || data.profile || data;
+      if (userData && userData.id && userData.email) {
+        setUser({ id: userData.id, email: userData.email });
+      }
       return { error: null };
     } catch (error: any) {
-      return { error: error.message };
+      return { error: error.message || "Registration failed" };
     }
   };
 
   const signOut = async () => {
     try {
-      await supabase.auth.signOut();
+      await apiClient.logout();
+    } catch (error) {
+      console.error("Logout API call failed:", error);
+    } finally {
       setUser(null);
       setProfile(null);
       navigate("/auth");
-    } catch (error) {
-      console.error("Logout error:", error);
     }
   };
 
   const updateProfile = async (updates: Partial<Omit<Profile, 'id' | 'email' | 'role'>>) => {
     if (!user) return { error: "Not authenticated" };
-    
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          full_name: updates.full_name,
-          phone: updates.phone,
-          department: updates.department,
-          avatar_url: updates.avatar_url,
-        })
-        .eq("id", user.id);
-
-      if (error) throw error;
-      
-      // Refresh profile data
-      await fetchProfile(user.id);
+      const response = await apiClient.updateProfile(updates);
+      await fetchProfile();
       return { error: null };
     } catch (error: any) {
-      return { error: error.message };
+      return { error: error.message || "Update failed" };
     }
   };
 
   const refreshProfile = async () => {
-    if (user) {
-      await fetchProfile(user.id);
-    }
+    await fetchProfile();
   };
 
   return (

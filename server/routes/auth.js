@@ -61,12 +61,12 @@ router.post('/register', [
     const saltRounds = parseInt(process.env.BCRYPT_ROUNDS) || 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // Create user
+    // Create user with hashed password
     const result = await pool.query(
-      `INSERT INTO profiles (email, full_name, role)
-       VALUES ($1, $2, 'employee')
+      `INSERT INTO profiles (email, full_name, role, password_hash)
+       VALUES ($1, $2, 'employee', $3)
        RETURNING id, email, full_name, role`,
-      [email, fullName]
+      [email, fullName, hashedPassword]
     );
 
     const user = result.rows[0];
@@ -107,7 +107,7 @@ router.post('/login', [
 
     // Find user
     const result = await pool.query(
-      `SELECT id, email, full_name, role, branch_id, department_id
+      `SELECT id, email, full_name, role, branch_id, department_id, password_hash
        FROM profiles WHERE email = $1`,
       [email]
     );
@@ -118,8 +118,21 @@ router.post('/login', [
 
     const user = result.rows[0];
 
-    // For now, since we're migrating from Supabase, we'll allow login without password check
-    // In production, you'd store hashed passwords in the database
+    // Verify password using bcrypt
+    // Note: For users migrated from Supabase without a password_hash,
+    // we require them to reset their password via /auth/forgot-password
+    if (!user.password_hash) {
+      return res.status(401).json({
+        error: 'Account requires password reset',
+        message: 'Please use the forgot-password feature to set a new password.'
+      });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
     const { accessToken, refreshToken } = generateTokens(user.id);
 
     // Log activity

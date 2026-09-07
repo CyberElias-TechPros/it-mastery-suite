@@ -10,6 +10,7 @@ CREATE TABLE public.profiles (
   role public.user_role NOT NULL DEFAULT 'employee',
   department TEXT,
   phone TEXT,
+  password_hash TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
