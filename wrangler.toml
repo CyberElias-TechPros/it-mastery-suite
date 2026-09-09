@@ -1,4 +1,4 @@
-name = "techpros-api"
+name = "it-mastery-suite"
 main = "cloudflare/workers/index.js"
 compatibility_date = "2024-09-01"
 compatibility_flags = ["nodejs_compat"]
