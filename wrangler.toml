@@ -1,0 +1,43 @@
+name = "techpros-api"
+main = "cloudflare/workers/index.js"
+compatibility_date = "2024-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Environment variables for production
+[vars]
+NODE_ENV = "production"
+FRONTEND_URL = "https://techpros-itsm.vercel.app"
+JWT_SECRET = "your_production_jwt_secret_here"
+JWT_EXPIRE = "24h"
+JWT_REFRESH_EXPIRE = "7d"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "techpros-itsm"
+database_id = "your-d1-database-id"
+
+# R2 Storage binding for file uploads
+[[r2_buckets]]
+binding = "STORAGE"
+bucket_name = "techpros-uploads"
+
+# KV binding for cache/config
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "your-kv-namespace-id"
+
+# Durable Objects (optional for future real-time collaboration)
+[[durable_objects.bindings]]
+name = "SESSION_ROOM"
+class_name = "SessionRoom"
+script_name = "techpros-api"
+
+# Migrations
+[[migrations]]
+tag = "v1"
+new_classes = ["SessionRoom"]
+
+# Cron triggers for scheduled tasks (optional)
+[triggers]
+crons = ["0 2 * * *"]  # Daily at 2 AM for cleanup/reports

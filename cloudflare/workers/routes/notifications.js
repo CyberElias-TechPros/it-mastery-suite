@@ -1,0 +1,1 @@
+export default { async handle(p, m, r, env, ctx) { return new Response(JSON.stringify({ message: 'Notifications route active', path: p, method: m }), { status: 200, headers: { 'Content-Type': 'application/json' } }); } };

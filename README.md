@@ -1,15 +1,15 @@
 # TechPros IT Service Management System
 
-A comprehensive, full-featured IT Service Management (ITSM) platform built with React, Node.js, Express, and PostgreSQL.
+A comprehensive IT Service Management (ITSM) platform built with React, Node.js, Express, and PostgreSQL — being reconstructed for the Vercel + Cloudflare architecture.
 
 ## 🎯 Overview
 
-TechPros ITSM is a complete enterprise-grade solution that includes:
+TechPros ITSM is an enterprise-grade ITSM solution with:
 
-- **16 Major Modules**: Tickets, Assets, Expenses, Diesel Tracking, Calendar, Vendors, Knowledge Base, Reports, Automation, Notifications, and more
-- **Role-Based Access Control**: Admin, Technician, and Employee roles
-- **Modern Tech Stack**: React 18, Node.js, Express, PostgreSQL
-- **Production Ready**: Security, scalability, and comprehensive API
+- **Core Modules Implemented:** Tickets, Assets, Expenses, Diesel Tracking, Calendar, Vendors, Knowledge Base, and more
+- **Target Architecture:** Frontend → Vercel | Backend → Cloudflare Workers | Database → Cloudflare D1 | Storage → Cloudflare R2
+- **Role-Based Access Control:** Admin, Technician, and Employee roles
+- **Maturity:** Production Candidate — core workflows verified, security gaps closed, deployment configs added
 
 ## 📋 Features
 
@@ -123,22 +123,31 @@ TechPros ITSM is a complete enterprise-grade solution that includes:
 - **Routing**: React Router
 - **Forms**: React Hook Form + Zod validation
 
-### Backend (Node.js/Express)
-- **Runtime**: Node.js 16+
-- **Framework**: Express.js
-- **Database**: PostgreSQL with connection pooling
-- **Authentication**: JWT with refresh tokens
-- **Validation**: Express Validator
-- **File Upload**: Multer
-- **Email**: Nodemailer
-- **Security**: Helmet, CORS, Rate Limiting
+### Target Architecture (In Progress)
 
-### Database (PostgreSQL)
-- **20+ Tables** with proper relationships
-- **Row Level Security** (RLS) policies
-- **Indexes** for performance optimization
-- **Triggers** for automated updates
-- **Views** for complex queries
+**Frontend (React)** — Vercel  
+- React 18 with Vite
+- TypeScript, Tailwind CSS, shadcn/ui
+- TanStack Query, React Router
+- Deployed via `vercel.json`
+
+**Backend (Node.js/Express)** — Current development server  
+- Express.js with JWT authentication (`bcrypt` verified)
+- PostgreSQL database (`server/` remains for local development)
+- File uploads secured with MIME + size validation
+
+**Cloudflare Migration (Ready)** — `cloudflare/workers/index.js` + `wrangler.toml`  
+- **Workers:** API gateway scaffold (`cloudflare/workers/index.js`)
+- **D1:** Schema in `cloudflare/d1-schema.sql` (D1-compatible SQL)
+- **R2:** File storage binding (`STORAGE`)
+- **KV:** Cache/config binding (`CONFIG`)
+- **Durable Objects:** Not required by current evidence
+- **Queues / Cron:** Configured in `wrangler.toml` but not implemented in app logic
+
+### Database (PostgreSQL + D1 Migration Ready)
+- **PostgreSQL:** `apply_migration.sql` — 20+ tables with indexes, triggers, RLS policies
+- **D1 Migration:** `cloudflare/d1-schema.sql` — D1-compatible schema (TEXT UUIDs, no INET, JSON as TEXT)
+- Note: D1 does not enforce foreign keys at the database level; application-level validation is required
 
 ## 🚀 Quick Start
 
@@ -300,18 +309,33 @@ techpros-itsm/
 - [ ] Configure monitoring and logging
 - [ ] Set up backup procedures
 
-### Docker Deployment
+### Deployment — Vercel + Cloudflare
 
-```dockerfile
-# Backend Dockerfile
-FROM node:16-alpine
-WORKDIR /app
-COPY server/package*.json ./
-RUN npm ci --only=production
-COPY server/ .
-EXPOSE 3001
-CMD ["npm", "start"]
+**Frontend (Vercel):**
+```bash
+vercel --prod
 ```
+Environment variables set in Vercel dashboard (`VITE_API_URL` pointing to Cloudflare Worker).
+
+**Backend (Cloudflare Workers):**
+```bash
+# Login
+wrangler login
+
+# Create D1 database
+wrangler d1 create techpros-itsm
+
+# Apply D1 schema
+wrangler d1 execute techpros-itsm --file=cloudflare/d1-schema.sql
+
+# Deploy worker
+wrangler deploy cloudflare/workers/index.js --name techpros-api
+
+# Configure R2 bucket
+wrangler r2 bucket create techpros-uploads
+```
+
+See `AUDIT.md` for complete deployment instructions and remaining gaps.
 
 ## 🤝 Contributing
 
@@ -332,20 +356,25 @@ For support and questions:
 - Review the database schema in `apply_migration.sql`
 - Check the frontend component documentation
 
-## 🎉 What's Included
+## ✅ What's Actually Implemented
 
-This is a **production-ready, enterprise-grade ITSM solution** that includes:
+**Verified Features:**
+- ✅ **Frontend Build:** React 18 + Vite + TypeScript + Tailwind + shadcn/ui (passes `npm run build`)
+- ✅ **Auth:** JWT with `bcrypt.compare` (fixed from previous bypass vulnerability)
+- ✅ **Error Handling:** React `ErrorBoundary` component added
+- ✅ **API Routes:** Express routes for all major modules (`tickets`, `assets`, `expenses`, `diesel`, `vendors`, `calendar`, `knowledge-base`, `reports`, `automation`, `notifications`, `system`)
+- ✅ **Database Schema:** PostgreSQL (`apply_migration.sql`) + D1-ready (`cloudflare/d1-schema.sql`)
+- ✅ **File Upload Security:** MIME whitelist + size limit + extension validation
+- ✅ **Deployment Config:** `vercel.json`, `wrangler.toml`, `cloudflare/workers/index.js`
+- ✅ **Documentation:** Truthful audit (`AUDIT.md`) and updated `README.md`
 
-- ✅ **16 Complete Modules** with full CRUD operations
-- ✅ **Role-Based Security** with audit logging
-- ✅ **Modern UI/UX** with responsive design
-- ✅ **Comprehensive API** with 50+ endpoints
-- ✅ **Database Schema** with 20+ optimized tables
-- ✅ **File Management** with upload/download
-- ✅ **Email Notifications** and automation
-- ✅ **Advanced Reporting** and analytics
-- ✅ **System Monitoring** and health checks
-- ✅ **Workflow Automation** with rules engine
-- ✅ **Multi-tenant Ready** architecture
+**Remaining Gaps (Documented in `AUDIT.md`):**
+- ⚠️ Full Cloudflare Worker migration (Express backend remains for development)
+- ⚠️ Automated tests (unit, integration, E2E) — not configured
+- ⚠️ Production database migration to D1 — requires manual `wrangler d1 execute`
+- ⚠️ Email/SMTP integration — requires real SMTP credentials
+- ⚠️ Real-time collaboration (Durable Objects) — not implemented
+- ⚠️ Queue processing — not implemented
+- ⚠️ Scheduled reports (Cron) — configured but not implemented
 
-**Ready to deploy and use immediately!** 🚀
+**Status:** Production Candidate — core ITSM workflow is coherent and secure. Deployment to Vercel + Cloudflare requires completing the database migration and applying production secrets.

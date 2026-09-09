@@ -1,0 +1,1 @@
+export default { async handle(p, m, r, env, ctx) { return new Response(JSON.stringify({ message: 'System route active', path: p, method: m, health: 'OK', db: !!env.DB, storage: !!env.STORAGE }), { status: 200, headers: { 'Content-Type': 'application/json' } }); } };
