@@ -15,7 +15,7 @@ JWT_REFRESH_EXPIRE = "7d"
 [[d1_databases]]
 binding = "DB"
 database_name = "techpros-itsm"
-database_id = "your-d1-database-id"
+database_id = "da8a79a0-2384-4b73-bc93-d1e62db28ef5"
 
 # R2 Storage binding for file uploads
 [[r2_buckets]]
@@ -25,18 +25,17 @@ bucket_name = "techpros-uploads"
 # KV binding for cache/config
 [[kv_namespaces]]
 binding = "CONFIG"
-id = "your-kv-namespace-id"
+id = "823bb5d69f8149dd84d735953195696e"
 
-# Durable Objects (optional for future real-time collaboration)
-[[durable_objects.bindings]]
-name = "SESSION_ROOM"
-class_name = "SessionRoom"
-script_name = "techpros-api"
+# Durable Objects disabled for initial deploy (class not exported)
+# [[durable_objects.bindings]]
+# name = "SESSION_ROOM"
+# class_name = "SessionRoom"
+# script_name = "techpros-api"
 
-# Migrations
-[[migrations]]
-tag = "v1"
-new_classes = ["SessionRoom"]
+# [[migrations]]
+# tag = "v1"
+# new_sqlite_classes = ["SessionRoom"]
 
 # Cron triggers for scheduled tasks (optional)
 [triggers]
