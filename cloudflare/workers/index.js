@@ -94,31 +94,29 @@ function addCorsHeaders(response, env) {
 }
 
 // Migrate all routes from server/routes/*.js
+// Route handlers receive the path with their prefix stripped (auth.js expects '/login', not '/auth/login').
+const ROUTES = [
+  ['/auth', authRoutes],
+  ['/tickets', ticketRoutes],
+  ['/assets', assetRoutes],
+  ['/expenses', expenseRoutes],
+  ['/vendors', vendorRoutes],
+  ['/calendar', calendarRoutes],
+  ['/knowledge-base', kbRoutes],
+  ['/reports', reportRoutes],
+  ['/automation', automationRoutes],
+  ['/notifications', notificationRoutes],
+  ['/system', systemRoutes],
+  ['/users', userRoutes],
+];
+
 async function routeRequest(path, method, request, env, ctx) {
-  // Auth
-  if (path.startsWith('/auth')) return await authRoutes.handle(path, method, request, env, ctx);
-  // Tickets
-  if (path.startsWith('/tickets')) return await ticketRoutes.handle(path, method, request, env, ctx);
-  // Assets
-  if (path.startsWith('/assets')) return await assetRoutes.handle(path, method, request, env, ctx);
-  // Expenses
-  if (path.startsWith('/expenses')) return await expenseRoutes.handle(path, method, request, env, ctx);
-  // Vendors
-  if (path.startsWith('/vendors')) return await vendorRoutes.handle(path, method, request, env, ctx);
-  // Calendar
-  if (path.startsWith('/calendar')) return await calendarRoutes.handle(path, method, request, env, ctx);
-  // Knowledge Base
-  if (path.startsWith('/knowledge-base')) return await kbRoutes.handle(path, method, request, env, ctx);
-  // Reports
-  if (path.startsWith('/reports')) return await reportRoutes.handle(path, method, request, env, ctx);
-  // Automation
-  if (path.startsWith('/automation')) return await automationRoutes.handle(path, method, request, env, ctx);
-  // Notifications
-  if (path.startsWith('/notifications')) return await notificationRoutes.handle(path, method, request, env, ctx);
-  // System
-  if (path.startsWith('/system')) return await systemRoutes.handle(path, method, request, env, ctx);
-  // Users
-  if (path.startsWith('/users')) return await userRoutes.handle(path, method, request, env, ctx);
+  for (const [prefix, handler] of ROUTES) {
+    if (path === prefix || path.startsWith(prefix + '/')) {
+      const rest = path.slice(prefix.length); // '' or '/...' — strip the prefix
+      return await handler.handle(rest, method, request, env, ctx);
+    }
+  }
 
   // 404 for unhandled routes
   return new Response(JSON.stringify({ error: 'Route not found', path, method }), {

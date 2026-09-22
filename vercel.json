@@ -22,13 +22,5 @@
       "src": "/assets/(.*)",
       "dest": "/dist/assets/$1"
     }
-  ],
-  "env": {
-    "VITE_API_URL": "https://techpros-api.your-account.workers.dev/api"
-  },
-  "build": {
-    "env": {
-      "VITE_API_URL": "https://techpros-api.your-account.workers.dev/api"
-    }
-  }
+  ]
 }
