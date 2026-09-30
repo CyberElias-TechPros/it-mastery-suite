@@ -1,0 +1,45 @@
+name: Deploy backend
+
+# Deploys the it-mastery-suite worker on push to main.
+# No migrations step: schema lives in cloudflare/d1-schema.sql (no
+# migrations dir, no tracking). Schema changes are manual and careful.
+# Requires repo secrets CF_API_TOKEN + CF_ACCOUNT_ID (Cyber account).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cloudflare/**"
+      - "wrangler.toml"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preflight secrets
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Missing CF_API_TOKEN / CF_ACCOUNT_ID repo secrets (Cyber account)."
+            exit 1
+          fi
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: deploy
+      - name: Verify health
+        run: |
+          body="$(curl -fsS https://it-mastery-suite.cyber-e54.workers.dev/api/health)"
+          echo "$body"
+          echo "$body" | grep -q '"status":"OK"' || { echo "::error::it-mastery-suite health check failed"; exit 1; }
