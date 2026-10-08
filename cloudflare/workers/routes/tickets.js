@@ -22,11 +22,18 @@ export default {
     // POST /tickets
     if (method === 'POST' && (!id || path === '/')) {
       const body = await request.json();
-      const { title, description, category = 'other', priority = 'medium', created_by = 'system' } = body;
+      const { title, description, category = 'other', priority = 'medium', created_by } = body;
+      if (!title) return new Response(JSON.stringify({ error: 'Title is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      let reporter = typeof created_by === 'string' ? created_by : null;
+      if (reporter) {
+        const ok = await env.DB.prepare('SELECT id FROM profiles WHERE id = ?').bind(reporter).first();
+        if (!ok) reporter = null;
+      }
+      if (!reporter) return new Response(JSON.stringify({ error: 'Sign in to create tickets' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
       const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString();
       const ticketNumber = 'TKT-' + id.slice(-6);
       await env.DB.prepare('INSERT INTO tickets (id, ticket_number, title, description, category, priority, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(id, ticketNumber, title, description, category, priority, 'open', created_by).run();
+        .bind(id, ticketNumber, title, description, category, priority, 'open', reporter).run();
       return new Response(JSON.stringify({ message: 'Ticket created', ticket: { id, ticket_number: ticketNumber } }), { status: 201, headers: { 'Content-Type': 'application/json' } });
     }
     return new Response(JSON.stringify({ error: 'Ticket route not handled', path, method }), { status: 404, headers: { 'Content-Type': 'application/json' } });
