@@ -1,0 +1,13 @@
+name: tmp-cleanup-qa
+on: workflow_dispatch
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+    steps:
+      - name: Delete QA test user
+        run: |
+          npx -y wrangler@latest d1 execute techpros-itsm --remote --command "DELETE FROM profiles WHERE email='qafixitm@example.com';"
+          npx -y wrangler@latest d1 execute techpros-itsm --remote --command "SELECT count(*) AS remaining FROM profiles WHERE email='qafixitm@example.com';"
